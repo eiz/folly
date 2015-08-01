@@ -14,13 +14,17 @@ include(FindPackageHandleStandardArgs)
 set(LIBLZMA_ROOT_DIR "" CACHE PATH "Folder contains LIBLZMA") 
 
 find_path(LIBLZMA_INCLUDE_DIR lzma.h
-    PATHS ${LIBLZMA_ROOT_DIR})
+	PATHS ${LIBLZMA_ROOT_DIR} ${LIBLZMA_ROOT_DIR}/src/liblzma/api)
 
 if(MSVC)
-    find_library(LIBLZMA_LIBRARY
-        NAMES lzma liblzma
-        PATHS ${LIBLZMA_ROOT_DIR})
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(_LIBLZMA_ARCH_PREFIX ReleaseMT/x64)
+    else()
+        set(_LIBLZMA_ARCH_PREFIX ReleaseMT/Win32)
+    endif()
 
+    find_library(LIBLZMA_LIBRARY liblzma
+        PATHS "${LIBLZMA_ROOT_DIR}/windows/${_LIBLZMA_ARCH_PREFIX}/liblzma")
     set(LIBLZMA_LIBRARY ${LIBLZMA_LIBRARY})
 else()
     find_library(LIBLZMA_LIBRARY lzma)

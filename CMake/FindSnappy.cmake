@@ -17,9 +17,13 @@ find_path(SNAPPY_INCLUDE_DIR snappy.h
     PATHS ${SNAPPY_ROOT_DIR})
 
 if(MSVC)
-    find_library(SNAPPY_LIBRARY
-        NAMES snappy snappy64
-        PATHS ${SNAPPY_ROOT_DIR})
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        find_library(SNAPPY_LIBRARY snappy64
+            PATHS ${SNAPPY_ROOT_DIR}/x64/Release)
+    else()
+        find_library(SNAPPY_LIBRARY snappy
+            PATHS ${SNAPPY_ROOT_DIR}/x86/Release)
+    endif()
 
     set(SNAPPY_LIBRARY ${SNAPPY_LIBRARY})
 else()
