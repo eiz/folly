@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#include "folly/io/IOBuf.h"
+#include <folly/io/IOBuf.h>
 
 #include <gflags/gflags.h>
-#include "folly/Benchmark.h"
-#include "folly/io/Cursor.h"
+#include <folly/Benchmark.h>
+#include <folly/io/Cursor.h>
 
 #include <vector>
 
@@ -150,7 +150,7 @@ chainBenchmark                         100000  118.6 ms  1.186 us  823.2 k
 poolBenchmark                          100000   32.2 ms    322 ns  2.962 M
 */
 int main(int argc, char** argv) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   setNumbers(10, 10);
   folly::runBenchmarks();

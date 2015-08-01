@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,9 @@
 #error This file may only be included from folly/gen/ParallelGen.h
 #endif
 
-#include "folly/MPMCQueue.h"
-#include "folly/ScopeGuard.h"
-#include "folly/experimental/EventCount.h"
+#include <folly/MPMCQueue.h>
+#include <folly/ScopeGuard.h>
+#include <folly/experimental/EventCount.h>
 #include <atomic>
 #include <thread>
 #include <vector>
@@ -136,7 +136,7 @@ class Sub : public Operator<Sub<Sink>> {
             class Source,
             class Result =
                 decltype(std::declval<Sink>().compose(std::declval<Source>())),
-            class Just = Just<typename std::decay<Result>::type>>
+            class Just = SingleCopy<typename std::decay<Result>::type>>
   Just compose(const GenImpl<Value, Source>& source) const {
     return Just(source | sink_);
   }
@@ -239,7 +239,7 @@ class Parallel : public Operator<Parallel<Ops>> {
             ops_(ops) {
         inQueue_.openProducer();
         outQueue_.openConsumer();
-        for (int t = 0; t < threads; ++t) {
+        for (size_t t = 0; t < threads; ++t) {
           inQueue_.openConsumer();
           outQueue_.openProducer();
           workers_.emplace_back([this] {
@@ -385,7 +385,7 @@ class ChunkedRangeSource
   Range<Iterator> range_;
 
  public:
-  ChunkedRangeSource() {}
+  ChunkedRangeSource() = default;
   ChunkedRangeSource(int chunkSize, Range<Iterator> range)
       : chunkSize_(chunkSize), range_(std::move(range)) {}
 

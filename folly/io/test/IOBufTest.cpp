@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,18 +14,15 @@
  * limitations under the License.
  */
 
-#include "folly/io/IOBuf.h"
-#include "folly/io/TypedIOBuf.h"
-
-// googletest requires std::tr1::tuple, not std::tuple
-#include <tr1/tuple>
+#include <folly/io/IOBuf.h>
+#include <folly/io/TypedIOBuf.h>
 
 #include <gflags/gflags.h>
 #include <boost/random.hpp>
 #include <gtest/gtest.h>
 
-#include "folly/Malloc.h"
-#include "folly/Range.h"
+#include <folly/Malloc.h>
+#include <folly/Range.h>
 
 using folly::fbstring;
 using folly::fbvector;
@@ -798,7 +795,7 @@ TEST(IOBuf, Alignment) {
   // max_align_t doesn't exist in gcc 4.6.2
   struct MaxAlign {
     char c;
-  } __attribute__((aligned));
+  } __attribute__((__aligned__));
   size_t alignment = alignof(MaxAlign);
 
   std::vector<size_t> sizes {0, 1, 64, 256, 1024, 1 << 10};
@@ -835,8 +832,12 @@ enum BufType {
 class MoveToFbStringTest
   : public ::testing::TestWithParam<std::tr1::tuple<int, int, bool, BufType>> {
  protected:
-  void SetUp() {
-    std::tr1::tie(elementSize_, elementCount_, shared_, type_) = GetParam();
+  void SetUp() override {
+    elementSize_ = std::tr1::get<0>(GetParam());
+    elementCount_ = std::tr1::get<1>(GetParam());
+    shared_ = std::tr1::get<2>(GetParam());
+    type_ = std::tr1::get<3>(GetParam());
+
     buf_ = makeBuf();
     for (int i = 0; i < elementCount_ - 1; ++i) {
       buf_->prependChain(makeBuf());
@@ -963,6 +964,19 @@ TEST(IOBuf, getIov) {
   buf->prev()->clear();
   iov = buf->getIov();
   EXPECT_EQ(count - 3, iov.size());
+
+  // test appending to an existing iovec array
+  iov.clear();
+  const char localBuf[] = "hello";
+  iov.push_back({(void*)localBuf, sizeof(localBuf)});
+  iov.push_back({(void*)localBuf, sizeof(localBuf)});
+  buf->appendToIov(&iov);
+  EXPECT_EQ(count - 1, iov.size());
+  EXPECT_EQ(localBuf, iov[0].iov_base);
+  EXPECT_EQ(localBuf, iov[1].iov_base);
+  // The first two IOBufs were cleared, so the next iov entry
+  // should be the third IOBuf in the chain.
+  EXPECT_EQ(buf->next()->next()->data(), iov[2].iov_base);
 }
 
 TEST(IOBuf, move) {
@@ -1006,9 +1020,226 @@ TEST(IOBuf, move) {
   EXPECT_FALSE(outerBuf.isShared());
 }
 
+namespace {
+std::unique_ptr<IOBuf> fromStr(StringPiece sp) {
+  return IOBuf::copyBuffer(ByteRange(sp));
+}
+}  // namespace
+
+TEST(IOBuf, HashAndEqual) {
+  folly::IOBufEqual eq;
+  folly::IOBufHash hash;
+
+  EXPECT_TRUE(eq(nullptr, nullptr));
+  EXPECT_EQ(0, hash(nullptr));
+
+  auto empty = IOBuf::create(0);
+
+  EXPECT_TRUE(eq(*empty, *empty));
+  EXPECT_TRUE(eq(empty, empty));
+
+  EXPECT_FALSE(eq(nullptr, empty));
+  EXPECT_FALSE(eq(empty, nullptr));
+
+  EXPECT_EQ(hash(*empty), hash(empty));
+  EXPECT_NE(0, hash(empty));
+
+  auto a = fromStr("hello");
+
+  EXPECT_TRUE(eq(*a, *a));
+  EXPECT_TRUE(eq(a, a));
+
+  EXPECT_FALSE(eq(nullptr, a));
+  EXPECT_FALSE(eq(a, nullptr));
+
+  EXPECT_EQ(hash(*a), hash(a));
+  EXPECT_NE(0, hash(a));
+
+  auto b = fromStr("hello");
+
+  EXPECT_TRUE(eq(*a, *b));
+  EXPECT_TRUE(eq(a, b));
+
+  EXPECT_EQ(hash(a), hash(b));
+
+  auto c = fromStr("hellow");
+
+  EXPECT_FALSE(eq(a, c));
+  EXPECT_NE(hash(a), hash(c));
+
+  auto d = fromStr("world");
+
+  EXPECT_FALSE(eq(a, d));
+  EXPECT_NE(hash(a), hash(d));
+
+  auto e = fromStr("helloworld");
+  auto f = fromStr("hello");
+  f->prependChain(fromStr("wo"));
+  f->prependChain(fromStr("rld"));
+
+  EXPECT_TRUE(eq(e, f));
+  EXPECT_EQ(hash(e), hash(f));
+}
+
+// reserveSlow() had a bug when reallocating the buffer in place. It would
+// preserve old headroom if it's not too much (heuristically) but wouldn't
+// adjust the requested amount of memory to account for that; the end result
+// would be that reserve() would return with less tailroom than requested.
+TEST(IOBuf, ReserveWithHeadroom) {
+  // This is assuming jemalloc, where we know that 4096 and 8192 bytes are
+  // valid (and consecutive) allocation sizes. We're hoping that our
+  // 4096-byte buffer can be expanded in place to 8192 (in practice, this
+  // usually happens).
+  const char data[] = "Lorem ipsum dolor sit amet, consectetur adipiscing elit";
+  constexpr size_t reservedSize = 24;  // sizeof(SharedInfo)
+  // chosen carefully so that the buffer is exactly 4096 bytes
+  IOBuf buf(IOBuf::CREATE, 4096 - reservedSize);
+  buf.advance(10);
+  memcpy(buf.writableData(), data, sizeof(data));
+  buf.append(sizeof(data));
+  EXPECT_EQ(sizeof(data), buf.length());
+
+  // Grow the buffer (hopefully in place); this would incorrectly reserve
+  // the 10 bytes of headroom, giving us 10 bytes less than requested.
+  size_t tailroom = 8192 - reservedSize - sizeof(data);
+  buf.reserve(0, tailroom);
+  EXPECT_LE(tailroom, buf.tailroom());
+  EXPECT_EQ(sizeof(data), buf.length());
+  EXPECT_EQ(0, memcmp(data, buf.data(), sizeof(data)));
+}
+
+TEST(IOBuf, CopyConstructorAndAssignmentOperator) {
+  auto buf = IOBuf::create(4096);
+  append(buf, "hello world");
+  auto buf2 = IOBuf::create(4096);
+  append(buf2, " goodbye");
+  buf->prependChain(std::move(buf2));
+  EXPECT_FALSE(buf->isShared());
+
+  {
+    auto copy = *buf;
+    EXPECT_TRUE(buf->isShared());
+    EXPECT_TRUE(copy.isShared());
+    EXPECT_EQ((void*)buf->data(), (void*)copy.data());
+    EXPECT_NE(buf->next(), copy.next());  // actually different buffers
+
+    auto copy2 = *buf;
+    copy2.coalesce();
+    EXPECT_TRUE(buf->isShared());
+    EXPECT_TRUE(copy.isShared());
+    EXPECT_FALSE(copy2.isShared());
+
+    auto p = reinterpret_cast<const char*>(copy2.data());
+    EXPECT_EQ("hello world goodbye", std::string(p, copy2.length()));
+  }
+
+  EXPECT_FALSE(buf->isShared());
+
+  {
+    folly::IOBuf newBuf(folly::IOBuf::CREATE, 4096);
+    EXPECT_FALSE(newBuf.isShared());
+
+    auto newBufCopy = newBuf;
+    EXPECT_TRUE(newBuf.isShared());
+    EXPECT_TRUE(newBufCopy.isShared());
+
+    newBufCopy = *buf;
+    EXPECT_TRUE(buf->isShared());
+    EXPECT_FALSE(newBuf.isShared());
+    EXPECT_TRUE(newBufCopy.isShared());
+  }
+
+  EXPECT_FALSE(buf->isShared());
+}
+
+namespace {
+// Use with string literals only
+std::unique_ptr<IOBuf> wrap(const char* str) {
+  return IOBuf::wrapBuffer(str, strlen(str));
+}
+
+std::unique_ptr<IOBuf> copy(const char* str) {
+  // At least 1KiB of tailroom, to ensure an external buffer
+  return IOBuf::copyBuffer(str, strlen(str), 0, 1024);
+}
+
+std::string toString(const folly::IOBuf& buf) {
+  std::string result;
+  result.reserve(buf.computeChainDataLength());
+  for (auto& b : buf) {
+    result.append(reinterpret_cast<const char*>(b.data()), b.size());
+  }
+  return result;
+}
+
+char* writableStr(folly::IOBuf& buf) {
+  return reinterpret_cast<char*>(buf.writableData());
+}
+
+}  // namespace
+
+TEST(IOBuf, Managed) {
+  auto hello = "hello";
+  auto buf1UP = wrap(hello);
+  auto buf1 = buf1UP.get();
+  EXPECT_FALSE(buf1->isManagedOne());
+  auto buf2UP = copy("world");
+  auto buf2 = buf2UP.get();
+  EXPECT_TRUE(buf2->isManagedOne());
+  auto buf3UP = wrap(hello);
+  auto buf3 = buf3UP.get();
+  auto buf4UP = buf2->clone();
+  auto buf4 = buf4UP.get();
+
+  // buf1 and buf3 share the same memory (but are unmanaged)
+  EXPECT_FALSE(buf1->isManagedOne());
+  EXPECT_FALSE(buf3->isManagedOne());
+  EXPECT_TRUE(buf1->isSharedOne());
+  EXPECT_TRUE(buf3->isSharedOne());
+  EXPECT_EQ(buf1->data(), buf3->data());
+
+  // buf2 and buf4 share the same memory (but are managed)
+  EXPECT_TRUE(buf2->isManagedOne());
+  EXPECT_TRUE(buf4->isManagedOne());
+  EXPECT_TRUE(buf2->isSharedOne());
+  EXPECT_TRUE(buf4->isSharedOne());
+  EXPECT_EQ(buf2->data(), buf4->data());
+
+  buf1->prependChain(std::move(buf2UP));
+  buf1->prependChain(std::move(buf3UP));
+  buf1->prependChain(std::move(buf4UP));
+
+  EXPECT_EQ("helloworldhelloworld", toString(*buf1));
+  EXPECT_FALSE(buf1->isManaged());
+
+  buf1->makeManaged();
+  EXPECT_TRUE(buf1->isManaged());
+
+  // buf1 and buf3 are now unshared (because they were unmanaged)
+  EXPECT_TRUE(buf1->isManagedOne());
+  EXPECT_TRUE(buf3->isManagedOne());
+  EXPECT_FALSE(buf1->isSharedOne());
+  EXPECT_FALSE(buf3->isSharedOne());
+  EXPECT_NE(buf1->data(), buf3->data());
+
+  // buf2 and buf4 are still shared
+  EXPECT_TRUE(buf2->isManagedOne());
+  EXPECT_TRUE(buf4->isManagedOne());
+  EXPECT_TRUE(buf2->isSharedOne());
+  EXPECT_TRUE(buf4->isSharedOne());
+  EXPECT_EQ(buf2->data(), buf4->data());
+
+  // And verify that the truth is what we expect: modify a byte in buf1 and
+  // buf2, see that the change from buf1 is *not* reflected in buf3, but the
+  // change from buf2 is reflected in buf4.
+  writableStr(*buf1)[0] = 'j';
+  writableStr(*buf2)[0] = 'x';
+  EXPECT_EQ("jelloxorldhelloxorld", toString(*buf1));
+}
+
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   return RUN_ALL_TESTS();
 }

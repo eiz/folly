@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,10 @@
 #include <type_traits>
 #include <functional>
 
-#include "folly/Portability.h"
+#include <folly/Portability.h>
 
-// libc++ doesn't provide this header
-#if !FOLLY_USE_LIBCPP
+// libc++ doesn't provide this header, nor does msvc
+#ifdef FOLLY_HAVE_BITS_CXXCONFIG_H
 // This file appears in two locations: inside fbcode and in the
 // libstdc++ source code (when embedding fbstring as std::string).
 // To aid in this schizophrenic use, two macros are defined in
@@ -290,34 +290,6 @@ struct IsOneOf<T, T1, Ts...> {
   enum { value = std::is_same<T, T1>::value || IsOneOf<T, Ts...>::value };
 };
 
-/**
- * A traits class to check for incomplete types.
- *
- * Example:
- *
- *  struct FullyDeclared {}; // complete type
- *  struct ForwardDeclared; // incomplete type
- *
- *  is_complete<int>::value // evaluates to true
- *  is_complete<FullyDeclared>::value // evaluates to true
- *  is_complete<ForwardDeclared>::value // evaluates to false
- *
- *  struct ForwardDeclared {}; // declared, at last
- *
- *  is_complete<ForwardDeclared>::value // now it evaluates to true
- *
- * @author: Marcelo Juchem <marcelo@fb.com>
- */
-template <typename T>
-class is_complete {
-  template <unsigned long long> struct sfinae {};
-  template <typename U>
-  constexpr static bool test(sfinae<sizeof(U)>*) { return true; }
-  template <typename> constexpr static bool test(...) { return false; }
-public:
-  constexpr static bool value = test<T>(nullptr);
-};
-
 /*
  * Complementary type traits for integral comparisons.
  *
@@ -337,8 +309,15 @@ struct is_negative_impl {
 
 template <typename T>
 struct is_negative_impl<T, false> {
-  constexpr static bool check(T x) { return false; }
+  constexpr static bool check(T) { return false; }
 };
+
+// folly::to integral specializations can end up generating code
+// inside what are really static ifs (not executed because of the templated
+// types) that violate -Wsign-compare so suppress them in order to not prevent
+// all calling code from using it.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-compare"
 
 template <typename RHS, RHS rhs, typename LHS>
 bool less_than_impl(
@@ -370,6 +349,8 @@ bool less_than_impl(
 ) {
   return false;
 }
+
+#pragma GCC diagnostic pop
 
 template <typename RHS, RHS rhs, typename LHS>
 bool greater_than_impl(
@@ -451,6 +432,16 @@ FOLLY_ASSUME_FBVECTOR_COMPATIBLE_1(std::function);
 // Boost
 FOLLY_ASSUME_FBVECTOR_COMPATIBLE_1(boost::shared_ptr);
 
+#define FOLLY_CREATE_HAS_MEMBER_TYPE_TRAITS(classname, type_name) \
+  template <typename T> \
+  struct classname { \
+    template <typename C> \
+    constexpr static bool test(typename C::type_name*) { return true; } \
+    template <typename> \
+    constexpr static bool test(...) { return false; } \
+    constexpr static bool value = test<T>(nullptr); \
+  }
+
 #define FOLLY_CREATE_HAS_MEMBER_FN_TRAITS_IMPL(classname, func_name, cv_qual) \
   template <typename TTheClass_, typename RTheReturn_, typename... TTheArgs_> \
   class classname<TTheClass_, RTheReturn_(TTheArgs_...) cv_qual> { \
@@ -518,7 +509,9 @@ FOLLY_ASSUME_FBVECTOR_COMPATIBLE_1(boost::shared_ptr);
   template <typename, typename> class classname; \
   FOLLY_CREATE_HAS_MEMBER_FN_TRAITS_IMPL(classname, func_name, ); \
   FOLLY_CREATE_HAS_MEMBER_FN_TRAITS_IMPL(classname, func_name, const); \
-  FOLLY_CREATE_HAS_MEMBER_FN_TRAITS_IMPL(classname, func_name, volatile); \
-  FOLLY_CREATE_HAS_MEMBER_FN_TRAITS_IMPL(classname, func_name, volatile const)
+  FOLLY_CREATE_HAS_MEMBER_FN_TRAITS_IMPL( \
+      classname, func_name, /* nolint */ volatile); \
+  FOLLY_CREATE_HAS_MEMBER_FN_TRAITS_IMPL( \
+      classname, func_name, /* nolint */ volatile const)
 
 #endif //FOLLY_BASE_TRAITS_H_

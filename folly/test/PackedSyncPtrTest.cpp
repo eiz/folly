@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/PackedSyncPtr.h"
+#include <folly/PackedSyncPtr.h>
 
 #include <cinttypes>
 #include <gtest/gtest.h>
@@ -28,7 +28,9 @@ namespace {
 
 // Compile time check for packability.  This requires that
 // PackedSyncPtr is a POD struct on gcc.
-struct ignore { PackedSyncPtr<int> foo; char c; } __attribute__((packed));
+FOLLY_PACK_PUSH
+struct ignore { PackedSyncPtr<int> foo; char c; } FOLLY_PACK_ATTR;
+FOLLY_PACK_POP
 static_assert(sizeof(ignore) == 9, "PackedSyncPtr wasn't packable");
 
 }
@@ -59,6 +61,7 @@ TEST(PackedSyncPtr, Basic) {
   EXPECT_EQ(sp.extra(), 0x13);
   EXPECT_EQ(sp.get(), newP);
   sp.unlock();
+  delete sp.get();
 }
 
 // Here we use the PackedSyncPtr to lock the whole SyncVec (base, *base, and sz)
@@ -66,6 +69,7 @@ template<typename T>
 struct SyncVec {
   PackedSyncPtr<T> base;
   SyncVec() { base.init(); }
+  ~SyncVec() { free(base.get()); }
   void push_back(const T& t) {
     base.set((T*) realloc(base.get(),
       (base.extra() + 1) * sizeof(T)));

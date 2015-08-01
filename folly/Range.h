@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,10 +20,13 @@
 #ifndef FOLLY_RANGE_H_
 #define FOLLY_RANGE_H_
 
-#include "folly/Portability.h"
-#include "folly/FBString.h"
+#include <folly/Portability.h>
+#include <folly/FBString.h>
+#include <folly/SpookyHashV2.h>
+
 #include <algorithm>
 #include <boost/operators.hpp>
+#include <climits>
 #include <cstring>
 #include <glog/logging.h>
 #include <iosfwd>
@@ -31,8 +34,8 @@
 #include <string>
 #include <type_traits>
 
-// libc++ doesn't provide this header
-#if !FOLLY_USE_LIBCPP
+// libc++ doesn't provide this header, nor does msvc
+#ifdef FOLLY_HAVE_BITS_CXXCONFIG_H
 // This file appears in two locations: inside fbcode and in the
 // libstdc++ source code (when embedding fbstring as std::string).
 // To aid in this schizophrenic use, two macros are defined in
@@ -42,9 +45,9 @@
 #include <bits/c++config.h>
 #endif
 
-#include "folly/CpuId.h"
-#include "folly/Traits.h"
-#include "folly/Likely.h"
+#include <folly/CpuId.h>
+#include <folly/Traits.h>
+#include <folly/Likely.h>
 
 // Ignore shadowing warnings within this file, so includers can use -Wshadow.
 #pragma GCC diagnostic push
@@ -121,6 +124,23 @@ value_before(Iter i) {
   return *--i;
 }
 
+/*
+ * Use IsCharPointer<T>::type to enable const char* or char*.
+ * Use IsCharPointer<T>::const_type to enable only const char*.
+ */
+template <class T> struct IsCharPointer {};
+
+template <>
+struct IsCharPointer<char*> {
+  typedef int type;
+};
+
+template <>
+struct IsCharPointer<const char*> {
+  typedef int const_type;
+  typedef int type;
+};
+
 } // namespace detail
 
 /**
@@ -144,38 +164,54 @@ public:
     typename std::iterator_traits<Iter>::reference>::type
   value_type;
   typedef typename std::iterator_traits<Iter>::reference reference;
+
+  /**
+   * For MutableStringPiece and MutableByteRange we define StringPiece
+   * and ByteRange as const_range_type (for everything else its just
+   * identity). We do that to enable operations such as find with
+   * args which are const.
+   */
+  typedef typename std::conditional<
+    std::is_same<Iter, char*>::value
+      || std::is_same<Iter, unsigned char*>::value,
+    Range<const value_type*>,
+    Range<Iter>>::type const_range_type;
+
   typedef std::char_traits<typename std::remove_const<value_type>::type>
     traits_type;
 
   static const size_type npos;
 
   // Works for all iterators
-  Range() : b_(), e_() {
+  constexpr Range() : b_(), e_() {
   }
+
+  constexpr Range(const Range&) = default;
+  constexpr Range(Range&&) = default;
 
 public:
   // Works for all iterators
-  Range(Iter start, Iter end) : b_(start), e_(end) {
+  constexpr Range(Iter start, Iter end) : b_(start), e_(end) {
   }
 
   // Works only for random-access iterators
-  Range(Iter start, size_t size)
+  constexpr Range(Iter start, size_t size)
       : b_(start), e_(start + size) { }
 
 #if FOLLY_HAVE_CONSTEXPR_STRLEN
-  // Works only for Range<const char*>
-  /* implicit */ constexpr Range(Iter str)
+  template <class T = Iter, typename detail::IsCharPointer<T>::type = 0>
+  constexpr /* implicit */ Range(Iter str)
       : b_(str), e_(str + strlen(str)) {}
 #else
-  // Works only for Range<const char*>
+  template <class T = Iter, typename detail::IsCharPointer<T>::type = 0>
   /* implicit */ Range(Iter str)
       : b_(str), e_(str + strlen(str)) {}
 #endif
-  // Works only for Range<const char*>
+  template <class T = Iter, typename detail::IsCharPointer<T>::const_type = 0>
   /* implicit */ Range(const std::string& str)
       : b_(str.data()), e_(b_ + str.size()) {}
 
-  // Works only for Range<const char*>
+  template <class T = Iter, typename detail::IsCharPointer<T>::const_type = 0>
   Range(const std::string& str, std::string::size_type startFrom) {
     if (UNLIKELY(startFrom > str.size())) {
       throw std::out_of_range("index out of range");
@@ -183,7 +219,8 @@ public:
     b_ = str.data() + startFrom;
     e_ = str.data() + str.size();
   }
-  // Works only for Range<const char*>
+
+  template <class T = Iter, typename detail::IsCharPointer<T>::const_type = 0>
   Range(const std::string& str,
         std::string::size_type startFrom,
         std::string::size_type size) {
@@ -197,23 +234,18 @@ public:
       e_ = b_ + size;
     }
   }
-  Range(const Range<Iter>& str,
-        size_t startFrom,
-        size_t size) {
-    if (UNLIKELY(startFrom > str.size())) {
-      throw std::out_of_range("index out of range");
-    }
-    b_ = str.b_ + startFrom;
-    if (str.size() - startFrom < size) {
-      e_ = str.e_;
-    } else {
-      e_ = b_ + size;
-    }
-  }
-  // Works only for Range<const char*>
+
+  Range(const Range& other,
+        size_type first,
+        size_type length = npos)
+      : Range(other.subpiece(first, length))
+    { }
+
+  template <class T = Iter, typename detail::IsCharPointer<T>::const_type = 0>
   /* implicit */ Range(const fbstring& str)
     : b_(str.data()), e_(b_ + str.size()) { }
-  // Works only for Range<const char*>
+
+  template <class T = Iter, typename detail::IsCharPointer<T>::const_type = 0>
   Range(const fbstring& str, fbstring::size_type startFrom) {
     if (UNLIKELY(startFrom > str.size())) {
       throw std::out_of_range("index out of range");
@@ -221,7 +253,8 @@ public:
     b_ = str.data() + startFrom;
     e_ = str.data() + str.size();
   }
-  // Works only for Range<const char*>
+
+  template <class T = Iter, typename detail::IsCharPointer<T>::const_type = 0>
   Range(const fbstring& str, fbstring::size_type startFrom,
         fbstring::size_type size) {
     if (UNLIKELY(startFrom > str.size())) {
@@ -278,7 +311,7 @@ public:
   template <class OtherIter, typename std::enable_if<
      (!std::is_same<Iter, OtherIter>::value &&
       std::is_convertible<OtherIter, Iter>::value), int>::type = 0>
-  /* implicit */ Range(const Range<OtherIter>& other)
+  constexpr /* implicit */ Range(const Range<OtherIter>& other)
     : b_(other.begin()),
       e_(other.end()) {
   }
@@ -289,10 +322,13 @@ public:
     (!std::is_same<Iter, OtherIter>::value &&
      !std::is_convertible<OtherIter, Iter>::value &&
      std::is_constructible<Iter, const OtherIter&>::value), int>::type = 0>
-  explicit Range(const Range<OtherIter>& other)
+  constexpr explicit Range(const Range<OtherIter>& other)
     : b_(other.begin()),
       e_(other.end()) {
   }
+
+  Range& operator=(const Range& rhs) & = default;
+  Range& operator=(Range&& rhs) & = default;
 
   void clear() {
     b_ = Iter();
@@ -345,20 +381,30 @@ public:
     assert(b_ < e_);
     return detail::value_before(e_);
   }
-  // Works only for Range<const char*>
+  // Works only for Range<const char*> and Range<char*>
   std::string str() const { return std::string(b_, size()); }
   std::string toString() const { return str(); }
-  // Works only for Range<const char*>
+  // Works only for Range<const char*> and Range<char*>
   fbstring fbstr() const { return fbstring(b_, size()); }
   fbstring toFbstring() const { return fbstr(); }
 
-  // Works only for Range<const char*>
-  int compare(const Range& o) const {
+  const_range_type castToConst() const {
+    return const_range_type(*this);
+  };
+
+  // Works only for Range<const char*> and Range<char*>
+  int compare(const const_range_type& o) const {
     const size_type tsize = this->size();
     const size_type osize = o.size();
     const size_type msize = std::min(tsize, osize);
     int r = traits_type::compare(data(), o.data(), msize);
-    if (r == 0) r = tsize - osize;
+    if (r == 0 && tsize != osize) {
+      // We check the signed bit of the subtraction and bit shift it
+      // to produce either 0 or 2. The subtraction yields the
+      // comparison values of either -1 or 1.
+      r = (static_cast<int>(
+             (osize - tsize) >> (CHAR_BIT * sizeof(size_t) - 1)) << 1) - 1;
+    }
     return r;
   }
 
@@ -382,7 +428,12 @@ public:
     return b_[i];
   }
 
-  // Works only for Range<const char*>
+  // Do NOT use this function, which was left behind for backwards
+  // compatibility.  Use SpookyHashV2 instead -- it is faster, and produces
+  // a 64-bit hash, which means dramatically fewer collisions in large maps.
+  // (The above advice does not apply if you are targeting a 32-bit system.)
+  //
+  // Works only for Range<const char*> and Range<char*>
   uint32_t hash() const {
     // Taken from fbi/nstring.h:
     //    Quick and dirty bernstein hash...fine for short ascii strings
@@ -417,80 +468,81 @@ public:
     --e_;
   }
 
-  Range subpiece(size_type first,
-                 size_type length = std::string::npos) const {
+  Range subpiece(size_type first, size_type length = npos) const {
     if (UNLIKELY(first > size())) {
       throw std::out_of_range("index out of range");
     }
-    return Range(b_ + first,
-                 std::min<std::string::size_type>(length, size() - first));
+
+    return Range(b_ + first, std::min(length, size() - first));
   }
 
   // string work-alike functions
-  size_type find(Range str) const {
-    return qfind(*this, str);
+  size_type find(const_range_type str) const {
+    return qfind(castToConst(), str);
   }
 
-  size_type find(Range str, size_t pos) const {
+  size_type find(const_range_type str, size_t pos) const {
     if (pos > size()) return std::string::npos;
-    size_t ret = qfind(subpiece(pos), str);
+    size_t ret = qfind(castToConst().subpiece(pos), str);
     return ret == npos ? ret : ret + pos;
   }
 
   size_type find(Iter s, size_t pos, size_t n) const {
     if (pos > size()) return std::string::npos;
-    size_t ret = qfind(pos ? subpiece(pos) : *this, Range(s, n));
+    auto forFinding = castToConst();
+    size_t ret = qfind(
+        pos ? forFinding.subpiece(pos) : forFinding, const_range_type(s, n));
     return ret == npos ? ret : ret + pos;
   }
 
-  // Works only for Range<const (unsigned) char*> which have Range(Iter) ctor
+  // Works only for Range<(const) (unsigned) char*> which have Range(Iter) ctor
   size_type find(const Iter s) const {
-    return qfind(*this, Range(s));
+    return qfind(castToConst(), const_range_type(s));
   }
 
-  // Works only for Range<const (unsigned) char*> which have Range(Iter) ctor
+  // Works only for Range<(const) (unsigned) char*> which have Range(Iter) ctor
   size_type find(const Iter s, size_t pos) const {
     if (pos > size()) return std::string::npos;
-    size_type ret = qfind(subpiece(pos), Range(s));
+    size_type ret = qfind(castToConst().subpiece(pos), const_range_type(s));
     return ret == npos ? ret : ret + pos;
   }
 
   size_type find(value_type c) const {
-    return qfind(*this, c);
+    return qfind(castToConst(), c);
   }
 
   size_type rfind(value_type c) const {
-    return folly::rfind(*this, c);
+    return folly::rfind(castToConst(), c);
   }
 
   size_type find(value_type c, size_t pos) const {
     if (pos > size()) return std::string::npos;
-    size_type ret = qfind(subpiece(pos), c);
+    size_type ret = qfind(castToConst().subpiece(pos), c);
     return ret == npos ? ret : ret + pos;
   }
 
-  size_type find_first_of(Range needles) const {
-    return qfind_first_of(*this, needles);
+  size_type find_first_of(const_range_type needles) const {
+    return qfind_first_of(castToConst(), needles);
   }
 
-  size_type find_first_of(Range needles, size_t pos) const {
+  size_type find_first_of(const_range_type needles, size_t pos) const {
     if (pos > size()) return std::string::npos;
-    size_type ret = qfind_first_of(subpiece(pos), needles);
+    size_type ret = qfind_first_of(castToConst().subpiece(pos), needles);
     return ret == npos ? ret : ret + pos;
   }
 
-  // Works only for Range<const (unsigned) char*> which have Range(Iter) ctor
+  // Works only for Range<(const) (unsigned) char*> which have Range(Iter) ctor
   size_type find_first_of(Iter needles) const {
-    return find_first_of(Range(needles));
+    return find_first_of(const_range_type(needles));
   }
 
-  // Works only for Range<const (unsigned) char*> which have Range(Iter) ctor
+  // Works only for Range<(const) (unsigned) char*> which have Range(Iter) ctor
   size_type find_first_of(Iter needles, size_t pos) const {
-    return find_first_of(Range(needles), pos);
+    return find_first_of(const_range_type(needles), pos);
   }
 
   size_type find_first_of(Iter needles, size_t pos, size_t n) const {
-    return find_first_of(Range(needles, n), pos);
+    return find_first_of(const_range_type(needles, n), pos);
   }
 
   size_type find_first_of(value_type c) const {
@@ -506,7 +558,7 @@ public:
    *
    * Note: Call find() directly if the index is needed.
    */
-  bool contains(const Range& other) const {
+  bool contains(const const_range_type& other) const {
     return find(other) != std::string::npos;
   }
 
@@ -522,8 +574,9 @@ public:
   /**
    * Does this Range start with another range?
    */
-  bool startsWith(const Range& other) const {
-    return size() >= other.size() && subpiece(0, other.size()) == other;
+  bool startsWith(const const_range_type& other) const {
+    return size() >= other.size()
+      && castToConst().subpiece(0, other.size()) == other;
   }
   bool startsWith(value_type c) const {
     return !empty() && front() == c;
@@ -532,8 +585,9 @@ public:
   /**
    * Does this Range end with another range?
    */
-  bool endsWith(const Range& other) const {
-    return size() >= other.size() && subpiece(size() - other.size()) == other;
+  bool endsWith(const const_range_type& other) const {
+    return size() >= other.size()
+      && castToConst().subpiece(size() - other.size()) == other;
   }
   bool endsWith(value_type c) const {
     return !empty() && back() == c;
@@ -543,7 +597,7 @@ public:
    * Remove the given prefix and return true if the range starts with the given
    * prefix; return false otherwise.
    */
-  bool removePrefix(const Range& prefix) {
+  bool removePrefix(const const_range_type& prefix) {
     return startsWith(prefix) && (b_ += prefix.size(), true);
   }
   bool removePrefix(value_type prefix) {
@@ -554,11 +608,71 @@ public:
    * Remove the given suffix and return true if the range ends with the given
    * suffix; return false otherwise.
    */
-  bool removeSuffix(const Range& suffix) {
+  bool removeSuffix(const const_range_type& suffix) {
     return endsWith(suffix) && (e_ -= suffix.size(), true);
   }
   bool removeSuffix(value_type suffix) {
     return endsWith(suffix) && (--e_, true);
+  }
+
+  /**
+   * Replaces the content of the range, starting at position 'pos', with
+   * contents of 'replacement'. Entire 'replacement' must fit into the
+   * range. Returns false if 'replacements' does not fit. Example use:
+   *
+   * char in[] = "buffer";
+   * auto msp = MutablesStringPiece(input);
+   * EXPECT_TRUE(msp.replaceAt(2, "tt"));
+   * EXPECT_EQ(msp, "butter");
+   *
+   * // not enough space
+   * EXPECT_FALSE(msp.replace(msp.size() - 1, "rr"));
+   * EXPECT_EQ(msp, "butter"); // unchanged
+   */
+  bool replaceAt(size_t pos, const_range_type replacement) {
+    if (size() < pos + replacement.size()) {
+      return false;
+    }
+
+    std::copy(replacement.begin(), replacement.end(), begin() + pos);
+
+    return true;
+  }
+
+  /**
+   * Replaces all occurences of 'source' with 'dest'. Returns number
+   * of replacements made. Source and dest have to have the same
+   * length. Throws if the lengths are different. If 'source' is a
+   * pattern that is overlapping with itself, we perform sequential
+   * replacement: "aaaaaaa".replaceAll("aa", "ba") --> "bababaa"
+   *
+   * Example use:
+   *
+   * char in[] = "buffer";
+   * auto msp = MutablesStringPiece(input);
+   * EXPECT_EQ(msp.replaceAll("ff","tt"), 1);
+   * EXPECT_EQ(msp, "butter");
+   */
+  size_t replaceAll(const_range_type source, const_range_type dest) {
+    if (source.size() != dest.size()) {
+      throw std::invalid_argument(
+          "replacement must have the same size as source");
+    }
+
+    if (dest.empty()) {
+      return 0;
+    }
+
+    size_t pos = 0;
+    size_t num_replaced = 0;
+    size_type found = std::string::npos;
+    while ((found = find(source, pos)) != std::string::npos) {
+      replaceAt(found, dest);
+      pos += source.size();
+      ++num_replaced;
+    }
+
+    return num_replaced;
   }
 
   /**
@@ -575,10 +689,10 @@ public:
    *  folly::StringPiece s("sample string for split_next");
    *  auto p = s.split_step(' ');
    *
-   *  // prints "sample"
+   *  // prints "string for split_next"
    *  cout << s << endl;
    *
-   *  // prints "string for split_next"
+   *  // prints "sample"
    *  cout << p << endl;
    *
    * Example 2:
@@ -611,7 +725,8 @@ public:
 
   /**
    * Convenience method that calls `split_step()` and passes the result to a
-   * functor, returning whatever the functor does.
+   * functor, returning whatever the functor does. Any additional arguments
+   * `args` passed to this function are perfectly forwarded to the functor.
    *
    * Say you have a functor with this signature:
    *
@@ -636,17 +751,49 @@ public:
    *    // ...
    *  }
    *
+   *  struct Foo {
+   *    void parse(folly::StringPiece s) {
+   *      s.split_step(' ', parse_field, bar, 10);
+   *      s.split_step('\t', parse_field, baz, 20);
+   *
+   *      auto const kludge = [](folly::StringPiece x, int &out, int def) {
+   *        if (x == "null") {
+   *          out = 0;
+   *        } else {
+   *          parse_field(x, out, def);
+   *        }
+   *      };
+   *
+   *      s.split_step('\t', kludge, gaz);
+   *      s.split_step(' ', kludge, foo);
+   *    }
+   *
+   *  private:
+   *    int bar;
+   *    int baz;
+   *    int gaz;
+   *    int foo;
+   *
+   *    static parse_field(folly::StringPiece s, int &out, int def) {
+   *      try {
+   *        out = folly::to<int>(s);
+   *      } catch (std::exception const &) {
+   *        value = def;
+   *      }
+   *    }
+   *  };
+   *
    * @author: Marcelo Juchem <marcelo@fb.com>
    */
-  template <typename TProcess>
-  auto split_step(value_type delimiter, TProcess &&process)
-    -> decltype(process(std::declval<Range>()))
-  { return process(split_step(delimiter)); }
+  template <typename TProcess, typename... Args>
+  auto split_step(value_type delimiter, TProcess &&process, Args &&...args)
+    -> decltype(process(std::declval<Range>(), std::forward<Args>(args)...))
+  { return process(split_step(delimiter), std::forward<Args>(args)...); }
 
-  template <typename TProcess>
-  auto split_step(Range delimiter, TProcess &&process)
-    -> decltype(process(std::declval<Range>()))
-  { return process(split_step(delimiter)); }
+  template <typename TProcess, typename... Args>
+  auto split_step(Range delimiter, TProcess &&process, Args &&...args)
+    -> decltype(process(std::declval<Range>(), std::forward<Args>(args)...))
+  { return process(split_step(delimiter), std::forward<Args>(args)...); }
 
 private:
   Iter b_, e_;
@@ -689,7 +836,17 @@ typedef Range<char*> MutableStringPiece;
 typedef Range<const unsigned char*> ByteRange;
 typedef Range<unsigned char*> MutableByteRange;
 
-std::ostream& operator<<(std::ostream& os, const StringPiece& piece);
+inline std::ostream& operator<<(std::ostream& os,
+                                const StringPiece piece) {
+  os.write(piece.start(), piece.size());
+  return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os,
+                                const MutableStringPiece piece) {
+  os.write(piece.start(), piece.size());
+  return os;
+}
 
 /**
  * Templated comparison operators
@@ -775,8 +932,9 @@ operator>=(const T& lhs, const U& rhs) {
   return StringPiece(lhs) >= StringPiece(rhs);
 }
 
+// Do NOT use this, use SpookyHashV2 instead, see commment on hash() above.
 struct StringPieceHash {
-  std::size_t operator()(const StringPiece& str) const {
+  std::size_t operator()(const StringPiece str) const {
     return static_cast<std::size_t>(str.hash());
   }
 };
@@ -842,15 +1000,15 @@ size_t qfind(const Range<T>& haystack,
 
 namespace detail {
 
-size_t qfind_first_byte_of_nosse(const StringPiece& haystack,
-                                 const StringPiece& needles);
+size_t qfind_first_byte_of_nosse(const StringPiece haystack,
+                                 const StringPiece needles);
 
 #if FOLLY_HAVE_EMMINTRIN_H && __GNUC_PREREQ(4, 6)
-size_t qfind_first_byte_of_sse42(const StringPiece& haystack,
-                                 const StringPiece& needles);
+size_t qfind_first_byte_of_sse42(const StringPiece haystack,
+                                 const StringPiece needles);
 
-inline size_t qfind_first_byte_of(const StringPiece& haystack,
-                                  const StringPiece& needles) {
+inline size_t qfind_first_byte_of(const StringPiece haystack,
+                                  const StringPiece needles) {
   static auto const qfind_first_byte_of_fn =
     folly::CpuId().sse42() ? qfind_first_byte_of_sse42
                            : qfind_first_byte_of_nosse;
@@ -858,8 +1016,8 @@ inline size_t qfind_first_byte_of(const StringPiece& haystack,
 }
 
 #else
-inline size_t qfind_first_byte_of(const StringPiece& haystack,
-                                  const StringPiece& needles) {
+inline size_t qfind_first_byte_of(const StringPiece haystack,
+                                  const StringPiece needles) {
   return qfind_first_byte_of_nosse(haystack, needles);
 }
 #endif // FOLLY_HAVE_EMMINTRIN_H
@@ -974,6 +1132,18 @@ inline size_t qfind_first_of(const Range<const unsigned char*>& haystack,
   return detail::qfind_first_byte_of(StringPiece(haystack),
                                      StringPiece(needles));
 }
+
+template<class Key, class Enable>
+struct hasher;
+
+template <class T>
+struct hasher<folly::Range<T*>,
+              typename std::enable_if<std::is_pod<T>::value, void>::type> {
+  size_t operator()(folly::Range<T*> r) const {
+    return hash::SpookyHashV2::Hash64(r.begin(), r.size() * sizeof(T), 0);
+  }
+};
+
 }  // !namespace folly
 
 #pragma GCC diagnostic pop

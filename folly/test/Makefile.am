@@ -2,7 +2,7 @@ SUBDIRS = . function_benchmark
 
 ACLOCAL_AMFLAGS = -I m4
 
-CPPFLAGS += -Igtest-1.6.0/include
+CPPFLAGS += -Igtest-1.7.0/include
 
 TESTS= \
 	sorted_vector_types_test \
@@ -14,18 +14,21 @@ TESTS= \
 	bits_test \
 	bit_iterator_test
 
-lib_LTLIBRARIES = libgtestmain.la libgtest.la
+check_LTLIBRARIES = libgtestmain.la libgtest.la
+check_PROGRAMS =
 
-libgtestmain_la_CPPFLAGS = -Igtest-1.6.0 -Igtest-1.6.0/src
-libgtestmain_la_SOURCES = gtest-1.6.0/src/gtest-all.cc gtest-1.6.0/src/gtest_main.cc
+libgtestmain_la_CPPFLAGS = -Igtest-1.7.0 -Igtest-1.7.0/src
+libgtestmain_la_SOURCES = gtest-1.7.0/src/gtest-all.cc gtest-1.7.0/src/gtest_main.cc
 
-libgtest_la_CPPFLAGS = -Igtest-1.6.0 -Igtest-1.6.0/src
-libgtest_la_SOURCES = gtest-1.6.0/src/gtest-all.cc
+libgtest_la_CPPFLAGS = -Igtest-1.7.0 -Igtest-1.7.0/src
+libgtest_la_SOURCES = gtest-1.7.0/src/gtest-all.cc
 
 noinst_HEADERS = FBStringTestBenchmarks.cpp.h \
 		 FBVectorTestBenchmarks.cpp.h
 
-noinst_PROGRAMS=benchmark_test
+spin_lock_test_SOURCES = SpinLockTest.cpp
+spin_lock_test_LDADD = libgtestmain.la $(top_builddir)/libfolly.la
+TESTS += spin_lock_test
 
 if HAVE_X86_64
 small_locks_test_SOURCES = SmallLocksTest.cpp
@@ -44,6 +47,10 @@ TESTS += small_vector_test
 discriminated_ptr_test_SOURCES = DiscriminatedPtrTest.cpp
 discriminated_ptr_test_LDADD = libgtestmain.la $(top_builddir)/libfolly.la
 TESTS += discriminated_ptr_test
+
+cpuid_test_SOURCES = CpuIdTest.cpp
+cpuid_test_LDADD = libgtestmain.la $(top_builddir)/libfolly.la
+TESTS += cpuid_test
 endif
 
 sorted_vector_types_test_SOURCES = sorted_vector_test.cpp
@@ -85,6 +92,7 @@ TESTS += json_test
 
 benchmark_test_SOURCES = BenchmarkTest.cpp
 benchmark_test_LDADD = libgtestmain.la $(top_builddir)/libfollybenchmark.la $(top_builddir)/libfolly.la
+check_PROGRAMS += benchmark_test
 
 # fails due to destructor
 scope_guard_test_SOURCES = ScopeGuardTest.cpp
@@ -92,7 +100,7 @@ scope_guard_test_LDADD = libgtestmain.la $(top_builddir)/libfolly.la
 TESTS += scope_guard_test
 
 timeout_queue_test_SOURCES = TimeoutQueueTest.cpp
-timeout_queue_test_LDADD = libgtestmain.la $(top_builddir)/libfollytimeout_queue.la
+timeout_queue_test_LDADD = libgtestmain.la $(top_builddir)/libfolly.la
 
 conv_test_SOURCES = ConvTest.cpp
 conv_test_LDADD = libgtestmain.la $(top_builddir)/libfollybenchmark.la $(top_builddir)/libfolly.la
@@ -123,8 +131,8 @@ concurrent_skiplist_test_LDADD = libgtest.la $(top_builddir)/libfolly.la
 TESTS += concurrent_skiplist_test
 
 concurrent_skiplist_benchmark_SOURCES = ConcurrentSkipListBenchmark.cpp
-concurrent_skiplist_benchmark_LDADD = $(top_builddir)/libfollybenchmark.la $(top_builddir)/libfolly.la
-noinst_PROGRAMS += concurrent_skiplist_benchmark
+concurrent_skiplist_benchmark_LDADD = libgtestmain.la $(top_builddir)/libfollybenchmark.la $(top_builddir)/libfolly.la
+check_PROGRAMS += concurrent_skiplist_benchmark
 
 histogram_test_SOURCES = HistogramTest.cpp
 histogram_test_LDADD = libgtestmain.la $(top_builddir)/libfolly.la
@@ -159,23 +167,51 @@ format_test_LDADD = libgtest.la $(top_builddir)/libfolly.la $(top_builddir)/libf
 TESTS += format_test
 
 fingerprint_test_SOURCES = FingerprintTest.cpp
-fingerprint_test_LDADD = libgtest.la $(top_builddir)/libfolly.la $(top_builddir)/libfollyfingerprint.la $(top_builddir)/libfollybenchmark.la
+fingerprint_test_LDADD = libgtest.la $(top_builddir)/libfolly.la $(top_builddir)/libfollybenchmark.la
 TESTS += fingerprint_test
 
 portability_test_SOURCES = PortabilityTest.cpp
 portability_test_LDADD = libgtestmain.la $(top_builddir)/libfolly.la
 TESTS += portability_test
 
-cpuid_test_SOURCES = CpuIdTest.cpp
-cpuid_test_LDADD = libgtestmain.la $(top_builddir)/libfolly.la
-TESTS += cpuid_test
-
 spooky_hash_v1_test_SOURCES = SpookyHashV1Test.cpp
-spooky_hash_v1_test_LDADD = $(top_builddir)/libfolly.la $(top_builddir)/libfollybenchmark.la
+spooky_hash_v1_test_LDADD = libgtestmain.la $(top_builddir)/libfolly.la $(top_builddir)/libfollybenchmark.la
 TESTS += spooky_hash_v1_test
 
 spooky_hash_v2_test_SOURCES = SpookyHashV2Test.cpp
-spooky_hash_v2_test_LDADD = $(top_builddir)/libfolly.la $(top_builddir)/libfollybenchmark.la
+spooky_hash_v2_test_LDADD = libgtestmain.la $(top_builddir)/libfolly.la $(top_builddir)/libfollybenchmark.la
 TESTS += spooky_hash_v2_test
 
-check_PROGRAMS= $(TESTS)
+futures_test_SOURCES = \
+    ../futures/test/CollectTest.cpp \
+    ../futures/test/ContextTest.cpp \
+    ../futures/test/CoreTest.cpp \
+    ../futures/test/ThreadedExecutorTest.cpp \
+    ../futures/test/EnsureTest.cpp \
+    ../futures/test/ExecutorTest.cpp \
+    ../futures/test/FSMTest.cpp \
+    ../futures/test/FilterTest.cpp \
+    ../futures/test/FutureTest.cpp \
+    ../futures/test/HeaderCompileTest.cpp \
+    ../futures/test/InterruptTest.cpp \
+    ../futures/test/MapTest.cpp \
+    ../futures/test/PollTest.cpp \
+    ../futures/test/PromiseTest.cpp \
+    ../futures/test/ReduceTest.cpp \
+    ../futures/test/RetryingTest.cpp \
+    ../futures/test/SharedPromiseTest.cpp \
+    ../futures/test/ThenCompileTest.cpp \
+    ../futures/test/ThenTest.cpp \
+    ../futures/test/TimekeeperTest.cpp \
+    ../futures/test/TryTest.cpp \
+    ../futures/test/UnitTest.cpp \
+    ../futures/test/UnwrapTest.cpp \
+    ../futures/test/ViaTest.cpp \
+    ../futures/test/WaitTest.cpp \
+    ../futures/test/WillEqualTest.cpp \
+    ../futures/test/WindowTest.cpp
+
+futures_test_LDADD = libgtestmain.la $(top_builddir)/libfolly.la
+TESTS += futures_test
+
+check_PROGRAMS += $(TESTS)

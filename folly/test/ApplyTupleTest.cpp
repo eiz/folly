@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,14 @@
 
 #include <iostream>
 
-#include "folly/ApplyTuple.h"
+#include <folly/ApplyTuple.h>
 #include <gtest/gtest.h>
 
 #include <memory>
+
+// this placates visual studio stupidity - see
+// http://stackoverflow.com/questions/5503901
+namespace {}
 
 namespace {
 
@@ -69,7 +73,7 @@ std::function<void (int, int, double)> makeFunc() {
 }
 
 struct GuardObjBase {
-  GuardObjBase(GuardObjBase&&) {}
+  GuardObjBase(GuardObjBase&&) noexcept {}
   GuardObjBase() {}
   GuardObjBase(GuardObjBase const&) = delete;
   GuardObjBase& operator=(GuardObjBase const&) = delete;
@@ -82,7 +86,7 @@ struct GuardObj : GuardObjBase {
     : f_(std::move(f))
     , args_(std::move(args))
   {}
-  GuardObj(GuardObj&& g)
+  GuardObj(GuardObj&& g) noexcept
     : GuardObjBase(std::move(g))
     , f_(std::move(g.f_))
     , args_(std::move(g.args_))
@@ -111,7 +115,7 @@ guard(F&& f, Args&&... args) {
 
 struct Mover {
   Mover() {}
-  Mover(Mover&&) {}
+  Mover(Mover&&) noexcept {}
   Mover(const Mover&) = delete;
   Mover& operator=(const Mover&) = delete;
 };
@@ -159,4 +163,6 @@ TEST(ApplyTuple, Test) {
   Mover m;
   folly::applyTuple(move_only_func,
                     std::forward_as_tuple(std::forward<Mover>(Mover())));
+  const auto tuple3 = std::make_tuple(1, 2, 3.0);
+  folly::applyTuple(func, tuple3);
 }

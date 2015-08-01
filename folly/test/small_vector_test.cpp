@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/small_vector.h"
+#include <folly/small_vector.h>
 
 #include <gtest/gtest.h>
 #include <string>
@@ -24,7 +24,7 @@
 
 #include <boost/algorithm/string.hpp>
 
-#include "folly/Conv.h"
+#include <folly/Conv.h>
 
 using folly::small_vector;
 using namespace folly::small_vector_policy;
@@ -50,15 +50,7 @@ static_assert(sizeof(small_vector<int32_t,1,uint8_t>) ==
                 8 + 1,
               "small_vector<int32_t,1,uint32_t> is wrong size");
 
-static_assert(sizeof(small_vector<int32_t,1,OneBitMutex>) == 16,
-              "OneBitMutex took more space than expected");
-
 static_assert(sizeof(small_vector<int16_t,4,uint16_t>) == 10,
-              "Sizeof unexpectedly large");
-static_assert(sizeof(small_vector<int16_t,4,uint16_t,OneBitMutex>) == 10,
-              "Sizeof unexpectedly large");
-static_assert(sizeof(small_vector<int16_t,4,NoHeap,uint16_t,
-                                  OneBitMutex>) == 10,
               "Sizeof unexpectedly large");
 
 #endif
@@ -144,7 +136,7 @@ struct NoncopyableCounter {
   ~NoncopyableCounter() {
     --alive;
   }
-  NoncopyableCounter(NoncopyableCounter&&) { ++alive; }
+  NoncopyableCounter(NoncopyableCounter&&) noexcept { ++alive; }
   NoncopyableCounter(NoncopyableCounter const&) = delete;
   NoncopyableCounter& operator=(NoncopyableCounter const&) const = delete;
   NoncopyableCounter& operator=(NoncopyableCounter&&) { return *this; }
@@ -167,7 +159,7 @@ struct TestBasicGuarantee {
   {
     throwCounter = 1000;
     for (int i = 0; i < prepopulate; ++i) {
-      vec.push_back(Thrower());
+      vec.emplace_back();
     }
   }
 
@@ -211,7 +203,7 @@ TEST(small_vector, BasicGuarantee) {
     (TestBasicGuarantee(prepop))( // parens or a mildly vexing parse :(
       1,
       [&] (folly::small_vector<Thrower,3>& v) {
-        v.push_back(Thrower());
+        v.emplace_back();
       }
     );
 
@@ -240,9 +232,9 @@ TEST(small_vector, BasicGuarantee) {
     3,
     [&] (folly::small_vector<Thrower,3>& v) {
       std::vector<Thrower> b;
-      b.push_back(Thrower());
-      b.push_back(Thrower());
-      b.push_back(Thrower());
+      b.emplace_back();
+      b.emplace_back();
+      b.emplace_back();
 
       /*
        * Apparently if you do the following initializer_list instead
@@ -259,7 +251,7 @@ TEST(small_vector, BasicGuarantee) {
     [&] (folly::small_vector<Thrower,3>& v) {
       std::vector<Thrower> b;
       for (int i = 0; i < 6; ++i) {
-        b.push_back(Thrower());
+        b.emplace_back();
       }
 
       v.insert(v.begin() + 1, b.begin(), b.end());
@@ -292,7 +284,7 @@ TEST(small_vector, Insert) {
   folly::small_vector<int> someVec(3, 3);
   someVec.insert(someVec.begin(), 12, 12);
   EXPECT_EQ(someVec.size(), 15);
-  for (int i = 0; i < someVec.size(); ++i) {
+  for (size_t i = 0; i < someVec.size(); ++i) {
     if (i < 12) {
       EXPECT_EQ(someVec[i], 12);
     } else {
@@ -432,7 +424,7 @@ TEST(small_vector, GrowShrinkGrow) {
   auto capacity = vec.capacity();
 
   auto oldSize = vec.size();
-  for (int i = 0; i < oldSize; ++i) {
+  for (size_t i = 0; i < oldSize; ++i) {
     vec.erase(vec.begin() + (std::rand() % vec.size()));
     EXPECT_EQ(vec.capacity(), capacity);
   }
@@ -545,10 +537,6 @@ TEST(small_vector, NoHeap) {
   EXPECT_TRUE(caught);
 
   // Check max_size works right with various policy combinations.
-  folly::small_vector<std::string,32,uint32_t,NoHeap,OneBitMutex> v2;
-  static_assert(v2.max_size() == 32, "max_size is incorrect");
-  folly::small_vector<std::string,32,uint32_t,OneBitMutex> v3;
-  EXPECT_EQ(v3.max_size(), (1ul << 30) - 1);
   folly::small_vector<std::string,32,uint32_t> v4;
   EXPECT_EQ(v4.max_size(), (1ul << 31) - 1);
 
@@ -576,8 +564,6 @@ TEST(small_vector, MaxSize) {
   EXPECT_EQ(vec.max_size(), 127);
   folly::small_vector<int,2,uint16_t> vec2;
   EXPECT_EQ(vec2.max_size(), (1 << 15) - 1);
-  folly::small_vector<int,2,uint16_t,OneBitMutex> vec3;
-  EXPECT_EQ(vec3.max_size(), (1 << 14) - 1);
 }
 
 TEST(small_vector, AllHeap) {
@@ -602,17 +588,9 @@ TEST(small_vector, AllHeap) {
 
 TEST(small_vector, Basic) {
   typedef folly::small_vector<int,3,uint32_t
-#if FOLLY_X64
-    ,OneBitMutex
-#endif
   > Vector;
 
   Vector a;
-
-#if FOLLY_X64
-  a.lock();
-  a.unlock();
-#endif
 
   a.push_back(12);
   EXPECT_EQ(a.front(), 12);
@@ -753,5 +731,74 @@ TEST(small_vector, SelfInsert) {
 
     EXPECT_EQ(vec[i-1], "abc");
     EXPECT_EQ(vec[i], "abc");
+  }
+}
+
+struct CheckedInt {
+  static const int DEFAULT_VALUE = (int)0xdeadbeef;
+  CheckedInt(): value(DEFAULT_VALUE) {}
+  explicit CheckedInt(int value): value(value) {}
+  CheckedInt(const CheckedInt& rhs): value(rhs.value) {}
+  CheckedInt(CheckedInt&& rhs) noexcept: value(rhs.value) {
+    rhs.value = DEFAULT_VALUE;
+  }
+  CheckedInt& operator= (const CheckedInt& rhs) {
+    value = rhs.value;
+    return *this;
+  }
+  CheckedInt& operator= (CheckedInt&& rhs) noexcept {
+    value = rhs.value;
+    rhs.value = DEFAULT_VALUE;
+    return *this;
+  }
+  ~CheckedInt() {}
+  int value;
+};
+
+TEST(small_vector, LVEmplaceInsideVector) {
+  folly::small_vector<CheckedInt> v;
+  v.push_back(CheckedInt(1));
+  for (int i = 1; i < 20; ++i) {
+    v.emplace_back(v[0]);
+    ASSERT_EQ(1, v.back().value);
+  }
+}
+
+TEST(small_vector, CLVEmplaceInsideVector) {
+  folly::small_vector<CheckedInt> v;
+  const folly::small_vector<CheckedInt>& cv = v;
+  v.push_back(CheckedInt(1));
+  for (int i = 1; i < 20; ++i) {
+    v.emplace_back(cv[0]);
+    ASSERT_EQ(1, v.back().value);
+  }
+}
+
+TEST(small_vector, RVEmplaceInsideVector) {
+  folly::small_vector<CheckedInt> v;
+  v.push_back(CheckedInt(0));
+  for (int i = 1; i < 20; ++i) {
+    v[0] = CheckedInt(1);
+    v.emplace_back(std::move(v[0]));
+    ASSERT_EQ(1, v.back().value);
+  }
+}
+
+TEST(small_vector, LVPushValueInsideVector) {
+  folly::small_vector<CheckedInt> v;
+  v.push_back(CheckedInt(1));
+  for (int i = 1; i < 20; ++i) {
+    v.push_back(v[0]);
+    ASSERT_EQ(1, v.back().value);
+  }
+}
+
+TEST(small_vector, RVPushValueInsideVector) {
+  folly::small_vector<CheckedInt> v;
+  v.push_back(CheckedInt(0));
+  for (int i = 1; i < 20; ++i) {
+    v[0] = CheckedInt(1);
+    v.push_back(v[0]);
+    ASSERT_EQ(1, v.back().value);
   }
 }

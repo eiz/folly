@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,19 +63,21 @@
 #ifndef FOLLY_DYNAMIC_H_
 #define FOLLY_DYNAMIC_H_
 
-#include <unordered_map>
-#include <memory>
-#include <string>
-#include <utility>
-#include <ostream>
-#include <type_traits>
-#include <initializer_list>
-#include <vector>
 #include <cstdint>
+#include <initializer_list>
+#include <memory>
+#include <ostream>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include <boost/operators.hpp>
 
-#include "folly/Traits.h"
-#include "folly/FBString.h"
+#include <folly/FBString.h>
+#include <folly/Range.h>
+#include <folly/Traits.h>
 
 namespace folly {
 
@@ -143,8 +145,11 @@ public:
   /*
    * String compatibility constructors.
    */
+  /* implicit */ dynamic(StringPiece val);
   /* implicit */ dynamic(char const* val);
   /* implicit */ dynamic(std::string const& val);
+  /* implicit */ dynamic(fbstring const& val);
+  /* implicit */ dynamic(fbstring&& val);
 
   /*
    * This is part of the plumbing for object(), above.  Used to create
@@ -175,8 +180,8 @@ public:
   template<class Iterator> dynamic(Iterator first, Iterator last);
 
   dynamic(dynamic const&);
-  dynamic(dynamic&&);
-  ~dynamic();
+  dynamic(dynamic&&) noexcept;
+  ~dynamic() noexcept;
 
   /*
    * "Deep" equality comparison.  This will compare all the way down
@@ -218,7 +223,7 @@ public:
    * Basic guarantee only.
    */
   dynamic& operator=(dynamic const&);
-  dynamic& operator=(dynamic&&);
+  dynamic& operator=(dynamic&&) noexcept;
 
   /*
    * For simple dynamics (not arrays or objects), this prints the
@@ -274,13 +279,34 @@ public:
   bool     asBool() const;
 
   /*
+   * Extract the value stored in this dynamic without type conversion.
+   *
+   * These will throw a TypeError if the dynamic has a different type.
+   */
+  const fbstring& getString() const&;
+  double          getDouble() const&;
+  int64_t         getInt() const&;
+  bool            getBool() const&;
+  fbstring& getString() &;
+  double&   getDouble() &;
+  int64_t&  getInt() &;
+  bool&     getBool() &;
+  fbstring getString() &&;
+  double   getDouble() &&;
+  int64_t  getInt() &&;
+  bool     getBool() &&;
+
+  /*
    * It is occasionally useful to access a string's internal pointer
    * directly, without the type conversion of `asString()`.
    *
    * These will throw a TypeError if the dynamic is not a string.
    */
-  const char* data()  const;
-  const char* c_str() const;
+  const char* data()  const&;
+  const char* data()  && = delete;
+  const char* c_str() const&;
+  const char* c_str() && = delete;
+  StringPiece stringPiece() const;
 
   /*
    * Returns: true if this dynamic is null, an empty array, an empty
@@ -326,7 +352,6 @@ public:
    */
   const_item_iterator find(dynamic const&) const;
 
-
   /*
    * If this is an object, returns whether it contains a field with
    * the given name.  Otherwise throws TypeError.
@@ -341,8 +366,9 @@ public:
    * will throw a TypeError.  Using an index that is out of range or
    * object-element that's not present throws std::out_of_range.
    */
-  dynamic const& at(dynamic const&) const;
-  dynamic&       at(dynamic const&);
+  dynamic const& at(dynamic const&) const&;
+  dynamic&       at(dynamic const&) &;
+  dynamic        at(dynamic const&) &&;
 
   /*
    * Like 'at', above, except it returns either a pointer to the contained
@@ -355,8 +381,9 @@ public:
    * Using these with dynamic objects that are not arrays or objects
    * will throw a TypeError.
    */
-  const dynamic* get_ptr(dynamic const&) const;
-  dynamic* get_ptr(dynamic const&);
+  const dynamic* get_ptr(dynamic const&) const&;
+  dynamic* get_ptr(dynamic const&) &;
+  dynamic* get_ptr(dynamic const&) && = delete;
 
   /*
    * This works for access to both objects and arrays.
@@ -370,8 +397,9 @@ public:
    *
    * These functions do not invalidate iterators.
    */
-  dynamic&       operator[](dynamic const&);
-  dynamic const& operator[](dynamic const&) const;
+  dynamic&       operator[](dynamic const&) &;
+  dynamic const& operator[](dynamic const&) const&;
+  dynamic        operator[](dynamic const&) &&;
 
   /*
    * Only defined for objects, throws TypeError otherwise.
@@ -382,8 +410,10 @@ public:
    * a reference to the existing value if present, the new value otherwise.
    */
   dynamic
-  getDefault(const dynamic& k, const dynamic& v = dynamic::object) const;
-  dynamic&& getDefault(const dynamic& k, dynamic&& v) const;
+  getDefault(const dynamic& k, const dynamic& v = dynamic::object) const&;
+  dynamic getDefault(const dynamic& k, dynamic&& v) const&;
+  dynamic getDefault(const dynamic& k, const dynamic& v = dynamic::object) &&;
+  dynamic getDefault(const dynamic& k, dynamic&& v) &&;
   template<class K, class V = dynamic>
   dynamic& setDefault(K&& k, V&& v = dynamic::object);
 
@@ -475,15 +505,16 @@ private:
 
   template<class T> T const& get() const;
   template<class T> T&       get();
-  template<class T> T*       get_nothrow();
-  template<class T> T const* get_nothrow() const;
-  template<class T> T*       getAddress();
-  template<class T> T const* getAddress() const;
+  template<class T> T*       get_nothrow() & noexcept;
+  template<class T> T const* get_nothrow() const& noexcept;
+  template<class T> T*       get_nothrow() && noexcept = delete;
+  template<class T> T*       getAddress() noexcept;
+  template<class T> T const* getAddress() const noexcept;
 
   template<class T> T asImpl() const;
 
   static char const* typeName(Type);
-  void destroy();
+  void destroy() noexcept;
   void print(std::ostream&) const;
   void print_as_pseudo_json(std::ostream&) const; // see json.cpp
 
@@ -509,7 +540,7 @@ private:
      * incomplete type right now).  (Note that in contrast we know it
      * is ok to do this with fbvector because we own it.)
      */
-    typename std::aligned_storage<
+    std::aligned_storage<
       sizeof(std::unordered_map<int,int>),
       alignof(std::unordered_map<int,int>)
     >::type objectBuffer;
@@ -520,6 +551,6 @@ private:
 
 }
 
-#include "folly/dynamic-inl.h"
+#include <folly/dynamic-inl.h>
 
 #endif

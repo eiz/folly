@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/Varint.h"
+#include <folly/Varint.h>
 
 #include <array>
 #include <initializer_list>
@@ -24,8 +24,8 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include "folly/Benchmark.h"
-#include "folly/Random.h"
+#include <folly/Benchmark.h>
+#include <folly/Random.h>
 
 DEFINE_int32(random_seed, folly::randomNumberSeed(), "random seed");
 
@@ -63,6 +63,24 @@ void testVarint(uint64_t val, std::initializer_list<uint8_t> bytes) {
       EXPECT_EQ(kMaxVarintLength64 - n, r.size());
     }
   }
+}
+
+TEST(Varint, Interface) {
+  // Make sure decodeVarint() accepts all of StringPiece, MutableStringPiece,
+  // ByteRange, and MutableByteRange.
+  char c = 0;
+
+  StringPiece sp(&c, 1);
+  EXPECT_EQ(decodeVarint(sp), 0);
+
+  MutableStringPiece msp(&c, 1);
+  EXPECT_EQ(decodeVarint(msp), 0);
+
+  ByteRange br(reinterpret_cast<unsigned char*>(&c), 1);
+  EXPECT_EQ(decodeVarint(br), 0);
+
+  MutableByteRange mbr(reinterpret_cast<unsigned char*>(&c), 1);
+  EXPECT_EQ(decodeVarint(mbr), 0);
 }
 
 TEST(Varint, Simple) {
@@ -115,7 +133,7 @@ void generateRandomValues() {
   for (size_t i = 0; i < kNumValues; ++i) {
     int n = numBytes(rng);
     uint64_t val = 0;
-    for (size_t j = 0; j < n; ++j) {
+    for (int j = 0; j < n; ++j) {
       val = (val << 8) + byte(rng);
     }
     gValues[i] = val;
@@ -172,7 +190,7 @@ BENCHMARK(VarintDecoding, iters) {
 
 int main(int argc, char *argv[]) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   google::InitGoogleLogging(argv[0]);
   int ret = RUN_ALL_TESTS();
   if (ret == 0) {
@@ -181,4 +199,3 @@ int main(int argc, char *argv[]) {
   }
   return ret;
 }
-

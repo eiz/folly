@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@
 #include <iterator>
 #include <type_traits>
 
-#include "folly/Malloc.h"
-#include "folly/io/IOBuf.h"
+#include <folly/Malloc.h>
+#include <folly/io/IOBuf.h>
 
 namespace folly {
 
@@ -173,7 +173,7 @@ class TypedIOBuf {
   void push(IT begin, IT end) {
     uint32_t n = std::distance(begin, end);
     if (usingJEMalloc()) {
-      // Rely on rallocm() and avoid exponential growth to limit
+      // Rely on xallocx() and avoid exponential growth to limit
       // amount of memory wasted.
       reserve(headroom(), n);
     } else if (tailroom() < n) {
@@ -216,4 +216,3 @@ class TypedIOBuf {
 }  // namespace folly
 
 #endif /* FOLLY_IO_TYPEDIOBUF_H_ */
-

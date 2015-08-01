@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,60 +20,14 @@
 #ifndef FOLLY_BASE_FBSTRING_H_
 #define FOLLY_BASE_FBSTRING_H_
 
-/**
-   fbstring's behavior can be configured via two macro definitions, as
-   follows. Normally, fbstring does not write a '\0' at the end of
-   each string whenever it changes the underlying characters. Instead,
-   it lazily writes the '\0' whenever either c_str() or data()
-   called.
-
-   This is standard-compliant behavior and may save costs in some
-   circumstances. However, it may be surprising to some client code
-   because c_str() and data() are const member functions (fbstring
-   uses the "mutable" storage class for its own state).
-
-   In order to appease client code that expects fbstring to be
-   zero-terminated at all times, if the preprocessor symbol
-   FBSTRING_CONSERVATIVE is defined, fbstring does exactly that,
-   i.e. it goes the extra mile to guarantee a '\0' is always planted
-   at the end of its data.
-
-   On the contrary, if the desire is to debug faulty client code that
-   unduly assumes the '\0' is present, fbstring plants a '^' (i.e.,
-   emphatically NOT a zero) at the end of each string if
-   FBSTRING_PERVERSE is defined. (Calling c_str() or data() still
-   writes the '\0', of course.)
-
-   The preprocessor symbols FBSTRING_PERVERSE and
-   FBSTRING_CONSERVATIVE cannot be defined simultaneously. This is
-   enforced during preprocessing.
-*/
-
-//#define FBSTRING_PERVERSE
-//#define FBSTRING_CONSERVATIVE
-
-#ifdef FBSTRING_PERVERSE
-#ifdef FBSTRING_CONSERVATIVE
-#error Cannot define both FBSTRING_PERVERSE and FBSTRING_CONSERVATIVE.
-#endif
-#endif
-
 #include <atomic>
 #include <limits>
 #include <type_traits>
-#include <algorithm>
 
-// libc++ doesn't provide this header
-#ifndef _LIBCPP_VERSION
 // This file appears in two locations: inside fbcode and in the
 // libstdc++ source code (when embedding fbstring as std::string).
-// To aid in this schizophrenic use, two macros are defined in
-// c++config.h:
-//   _LIBSTDCXX_FBSTRING - Set inside libstdc++.  This is useful to
-//      gate use inside fbcode v. libstdc++
-#include <bits/c++config.h>
-#endif
-
+// To aid in this schizophrenic use, _LIBSTDCXX_FBSTRING is defined in
+// libstdc++'s c++config.h, to gate use inside fbcode v. libstdc++.
 #ifdef _LIBSTDCXX_FBSTRING
 
 #pragma GCC system_header
@@ -82,25 +36,36 @@
 // either before or after this inclusion.
 #ifdef FOLLY_MALLOC_H_
 #undef FOLLY_MALLOC_H_
-#include "basic_fbstring_malloc.h"
+#include "basic_fbstring_malloc.h" // nolint
 #else
-#include "basic_fbstring_malloc.h"
+#include "basic_fbstring_malloc.h" // nolint
 #undef FOLLY_MALLOC_H_
 #endif
 
 #else // !_LIBSTDCXX_FBSTRING
 
+#include <folly/Portability.h>
+
+// libc++ doesn't provide this header, nor does msvc
+#ifdef FOLLY_HAVE_BITS_CXXCONFIG_H
+#include <bits/c++config.h>
+#endif
+
 #include <string>
 #include <cstring>
 #include <cassert>
+#include <algorithm>
 
-#include "folly/Traits.h"
-#include "folly/Malloc.h"
-#include "folly/Hash.h"
+#include <folly/Traits.h>
+#include <folly/Malloc.h>
+#include <folly/Hash.h>
+#include <folly/ScopeGuard.h>
 
+#if FOLLY_HAVE_DEPRECATED_ASSOC
 #ifdef _GLIBCXX_SYMVER
 #include <ext/hash_set>
 #include <ext/hash_map>
+#endif
 #endif
 
 #endif
@@ -121,6 +86,7 @@
 
 // FBString cannot use throw when replacing std::string, though it may still
 // use std::__throw_*
+// nolint
 #define throw FOLLY_FBSTRING_MAY_NOT_USE_THROW
 
 #ifdef _LIBSTDCXX_FBSTRING
@@ -328,16 +294,19 @@ public:
     ml_.capacity_ = maxSmallSize << (8 * (sizeof(size_t) - sizeof(Char)));
     // or: setSmallSize(0);
     writeTerminator();
-    assert(category() == isSmall && size() == 0);
+    assert(category() == Category::isSmall && size() == 0);
   }
 
   fbstring_core(const fbstring_core & rhs) {
     assert(&rhs != this);
     // Simplest case first: small strings are bitblitted
-    if (rhs.category() == isSmall) {
-      assert(offsetof(MediumLarge, data_) == 0);
-      assert(offsetof(MediumLarge, size_) == sizeof(ml_.data_));
-      assert(offsetof(MediumLarge, capacity_) == 2 * sizeof(ml_.data_));
+    if (rhs.category() == Category::isSmall) {
+      static_assert(offsetof(MediumLarge, data_) == 0,
+          "fbstring layout failure");
+      static_assert(offsetof(MediumLarge, size_) == sizeof(ml_.data_),
+          "fbstring layout failure");
+      static_assert(offsetof(MediumLarge, capacity_) == 2 * sizeof(ml_.data_),
+          "fbstring layout failure");
       const size_t size = rhs.smallSize();
       if (size == 0) {
         ml_.capacity_ = rhs.ml_.capacity_;
@@ -350,12 +319,12 @@ public:
         // ml_.capacity field).
         ml_ = rhs.ml_;
       }
-      assert(category() == isSmall && this->size() == rhs.size());
-    } else if (rhs.category() == isLarge) {
+      assert(category() == Category::isSmall && this->size() == rhs.size());
+    } else if (rhs.category() == Category::isLarge) {
       // Large strings are just refcounted
       ml_ = rhs.ml_;
       RefCounted::incrementRefs(ml_.data_);
-      assert(category() == isLarge && size() == rhs.size());
+      assert(category() == Category::isLarge && size() == rhs.size());
     } else {
       // Medium strings are copied eagerly. Don't forget to allocate
       // one extra Char for the null terminator.
@@ -369,15 +338,16 @@ public:
       // No need for writeTerminator() here, we copied one extra
       // element just above.
       ml_.size_ = rhs.ml_.size_;
-      ml_.capacity_ = (allocSize / sizeof(Char) - 1) | isMedium;
-      assert(category() == isMedium);
+      ml_.capacity_ = (allocSize / sizeof(Char) - 1)
+                      | static_cast<category_type>(Category::isMedium);
+      assert(category() == Category::isMedium);
     }
     assert(size() == rhs.size());
     assert(memcmp(data(), rhs.data(), size() * sizeof(Char)) == 0);
   }
 
   fbstring_core(fbstring_core&& goner) noexcept {
-    if (goner.category() == isSmall) {
+    if (goner.category() == Category::isSmall) {
       // Just copy, leave the goner in peace
       new(this) fbstring_core(goner.small_, goner.smallSize());
     } else {
@@ -393,13 +363,25 @@ public:
   // so just disable it on this function.
   fbstring_core(const Char *const data, const size_t size)
       FBSTRING_DISABLE_ADDRESS_SANITIZER {
+#ifndef NDEBUG
+#ifndef _LIBSTDCXX_FBSTRING
+    SCOPE_EXIT {
+      assert(this->size() == size);
+      assert(memcmp(this->data(), data, size * sizeof(Char)) == 0);
+    };
+#endif
+#endif
+
     // Simplest case first: small strings are bitblitted
     if (size <= maxSmallSize) {
       // Layout is: Char* data_, size_t size_, size_t capacity_
-      /*static_*/assert(sizeof(*this) == sizeof(Char*) + 2 * sizeof(size_t));
-      /*static_*/assert(sizeof(Char*) == sizeof(size_t));
+      static_assert(sizeof(*this) == sizeof(Char*) + 2 * sizeof(size_t),
+          "fbstring has unexpected size");
+      static_assert(sizeof(Char*) == sizeof(size_t),
+          "fbstring size assumption violation");
       // sizeof(size_t) must be a power of 2
-      /*static_*/assert((sizeof(size_t) & (sizeof(size_t) - 1)) == 0);
+      static_assert((sizeof(size_t) & (sizeof(size_t) - 1)) == 0,
+          "fbstring size assumption violation");
 
       // If data is aligned, use fast word-wise copying. Otherwise,
       // use conservative memcpy.
@@ -424,6 +406,7 @@ public:
         }
       }
       setSmallSize(size);
+      return;
     } else if (size <= maxMediumSize) {
       // Medium strings are allocated normally. Don't forget to
       // allocate one extra Char for the terminating null.
@@ -431,26 +414,26 @@ public:
       ml_.data_ = static_cast<Char*>(checkedMalloc(allocSize));
       fbstring_detail::pod_copy(data, data + size, ml_.data_);
       ml_.size_ = size;
-      ml_.capacity_ = (allocSize / sizeof(Char) - 1) | isMedium;
+      ml_.capacity_ = (allocSize / sizeof(Char) - 1)
+                      | static_cast<category_type>(Category::isMedium);
     } else {
       // Large strings are allocated differently
       size_t effectiveCapacity = size;
       auto const newRC = RefCounted::create(data, & effectiveCapacity);
       ml_.data_ = newRC->data_;
       ml_.size_ = size;
-      ml_.capacity_ = effectiveCapacity | isLarge;
+      ml_.capacity_ = effectiveCapacity
+                      | static_cast<category_type>(Category::isLarge);
     }
     writeTerminator();
-    assert(this->size() == size);
-    assert(memcmp(this->data(), data, size * sizeof(Char)) == 0);
   }
 
   ~fbstring_core() noexcept {
     auto const c = category();
-    if (c == isSmall) {
+    if (c == Category::isSmall) {
       return;
     }
-    if (c == isMedium) {
+    if (c == Category::isMedium) {
       free(ml_.data_);
       return;
     }
@@ -475,7 +458,8 @@ public:
       ml_.data_ = data;
       ml_.size_ = size;
       // Don't forget about null terminator
-      ml_.capacity_ = (allocatedSize - 1) | isMedium;
+      ml_.capacity_ = (allocatedSize - 1)
+                      | static_cast<category_type>(Category::isMedium);
     } else {
       // No need for the memory
       free(data);
@@ -500,11 +484,11 @@ public:
 
   Char * mutable_data() {
     auto const c = category();
-    if (c == isSmall) {
+    if (c == Category::isSmall) {
       return small_;
     }
-    assert(c == isMedium || c == isLarge);
-    if (c == isLarge && RefCounted::refs(ml_.data_) > 1) {
+    assert(c == Category::isMedium || c == Category::isLarge);
+    if (c == Category::isLarge && RefCounted::refs(ml_.data_) > 1) {
       // Ensure unique.
       size_t effectiveCapacity = ml_.capacity();
       auto const newRC = RefCounted::create(& effectiveCapacity);
@@ -522,44 +506,27 @@ public:
 
   const Char * c_str() const {
     auto const c = category();
-#ifdef FBSTRING_PERVERSE
-    if (c == isSmall) {
-      assert(small_[smallSize()] == TERMINATOR || smallSize() == maxSmallSize
-             || small_[smallSize()] == '\0');
-      small_[smallSize()] = '\0';
-      return small_;
-    }
-    assert(c == isMedium || c == isLarge);
-    assert(ml_.data_[ml_.size_] == TERMINATOR || ml_.data_[ml_.size_] == '\0');
-    ml_.data_[ml_.size_] = '\0';
-#elif defined(FBSTRING_CONSERVATIVE)
-    if (c == isSmall) {
+    if (c == Category::isSmall) {
       assert(small_[smallSize()] == '\0');
       return small_;
     }
-    assert(c == isMedium || c == isLarge);
+    assert(c == Category::isMedium || c == Category::isLarge);
     assert(ml_.data_[ml_.size_] == '\0');
-#else
-    if (c == isSmall) {
-      small_[smallSize()] = '\0';
-      return small_;
-    }
-    assert(c == isMedium || c == isLarge);
-    ml_.data_[ml_.size_] = '\0';
-#endif
     return ml_.data_;
   }
 
   void shrink(const size_t delta) {
-    if (category() == isSmall) {
+    if (category() == Category::isSmall) {
       // Check for underflow
       assert(delta <= smallSize());
       setSmallSize(smallSize() - delta);
-    } else if (category() == isMedium || RefCounted::refs(ml_.data_) == 1) {
+    } else if (category() == Category::isMedium ||
+               RefCounted::refs(ml_.data_) == 1) {
       // Medium strings and unique large strings need no special
       // handling.
       assert(ml_.size_ >= delta);
       ml_.size_ -= delta;
+      writeTerminator();
     } else {
       assert(ml_.size_ >= delta);
       // Shared large string, must make unique. This is because of the
@@ -569,13 +536,11 @@ public:
         fbstring_core(ml_.data_, ml_.size_ - delta).swap(*this);
       }
       // No need to write the terminator.
-      return;
     }
-    writeTerminator();
   }
 
   void reserve(size_t minCapacity) {
-    if (category() == isLarge) {
+    if (category() == Category::isLarge) {
       // Ensure unique
       if (RefCounted::refs(ml_.data_) > 1) {
         // We must make it unique regardless; in-place reallocation is
@@ -591,7 +556,8 @@ public:
         // we have + 1 above.
         RefCounted::decrementRefs(ml_.data_);
         ml_.data_ = newRC->data_;
-        ml_.capacity_ = minCapacity | isLarge;
+        ml_.capacity_ = minCapacity
+                        | static_cast<category_type>(Category::isLarge);
         // size remains unchanged
       } else {
         // String is not shared, so let's try to realloc (if needed)
@@ -601,12 +567,13 @@ public:
                RefCounted::reallocate(ml_.data_, ml_.size_,
                                       ml_.capacity(), minCapacity);
           ml_.data_ = newRC->data_;
-          ml_.capacity_ = minCapacity | isLarge;
+          ml_.capacity_ = minCapacity
+                          | static_cast<category_type>(Category::isLarge);
           writeTerminator();
         }
         assert(capacity() >= minCapacity);
       }
-    } else if (category() == isMedium) {
+    } else if (category() == Category::isMedium) {
       // String is not shared
       if (minCapacity <= ml_.capacity()) {
         return; // nothing to do, there's enough room
@@ -622,7 +589,8 @@ public:
             (ml_.capacity() + 1) * sizeof(Char),
             capacityBytes));
         writeTerminator();
-        ml_.capacity_ = (capacityBytes / sizeof(Char) - 1) | isMedium;
+        ml_.capacity_ = (capacityBytes / sizeof(Char) - 1)
+                        | static_cast<category_type>(Category::isMedium);
       } else {
         // Conversion from medium to large string
         fbstring_core nascent;
@@ -636,7 +604,7 @@ public:
         assert(capacity() >= minCapacity);
       }
     } else {
-      assert(category() == isSmall);
+      assert(category() == Category::isSmall);
       if (minCapacity > maxMediumSize) {
         // large
         auto const newRC = RefCounted::create(& minCapacity);
@@ -645,7 +613,8 @@ public:
         // No need for writeTerminator(), we wrote it above with + 1.
         ml_.data_ = newRC->data_;
         ml_.size_ = size;
-        ml_.capacity_ = minCapacity | isLarge;
+        ml_.capacity_ = minCapacity
+                        | static_cast<category_type>(Category::isLarge);
         assert(capacity() >= minCapacity);
       } else if (minCapacity > maxSmallSize) {
         // medium
@@ -658,7 +627,8 @@ public:
         // No need for writeTerminator(), we wrote it above with + 1.
         ml_.data_ = data;
         ml_.size_ = size;
-        ml_.capacity_ = (allocSizeBytes / sizeof(Char) - 1) | isMedium;
+        ml_.capacity_ = (allocSizeBytes / sizeof(Char) - 1)
+                        | static_cast<category_type>(Category::isMedium);
       } else {
         // small
         // Nothing to do, everything stays put
@@ -671,12 +641,11 @@ public:
     // Strategy is simple: make room, then change size
     assert(capacity() >= size());
     size_t sz, newSz;
-    if (category() == isSmall) {
+    if (category() == Category::isSmall) {
       sz = smallSize();
       newSz = sz + delta;
       if (newSz <= maxSmallSize) {
         setSmallSize(newSz);
-        writeTerminator();
         return small_ + sz;
       }
       reserve(newSz);
@@ -689,7 +658,7 @@ public:
     }
     assert(capacity() >= newSz);
     // Category can't be small - we took care of that above
-    assert(category() == isMedium || category() == isLarge);
+    assert(category() == Category::isMedium || category() == Category::isLarge);
     ml_.size_ = newSz;
     writeTerminator();
     assert(size() == newSz);
@@ -699,12 +668,11 @@ public:
   void push_back(Char c) {
     assert(capacity() >= size());
     size_t sz;
-    if (category() == isSmall) {
+    if (category() == Category::isSmall) {
       sz = smallSize();
       if (sz < maxSmallSize) {
-        setSmallSize(sz + 1);
         small_[sz] = c;
-        writeTerminator();
+        setSmallSize(sz + 1);
         return;
       }
       reserve(maxSmallSize * 2);
@@ -717,21 +685,21 @@ public:
     assert(!isShared());
     assert(capacity() >= sz + 1);
     // Category can't be small - we took care of that above
-    assert(category() == isMedium || category() == isLarge);
+    assert(category() == Category::isMedium || category() == Category::isLarge);
     ml_.size_ = sz + 1;
     ml_.data_[sz] = c;
     writeTerminator();
   }
 
   size_t size() const {
-    return category() == isSmall ? smallSize() : ml_.size_;
+    return category() == Category::isSmall ? smallSize() : ml_.size_;
   }
 
   size_t capacity() const {
     switch (category()) {
-      case isSmall:
+      case Category::isSmall:
         return maxSmallSize;
-      case isLarge:
+      case Category::isLarge:
         // For large-sized strings, a multi-referenced chunk has no
         // available capacity. This is because any attempt to append
         // data would trigger a new allocation.
@@ -742,26 +710,18 @@ public:
   }
 
   bool isShared() const {
-    return category() == isLarge && RefCounted::refs(ml_.data_) > 1;
+    return category() == Category::isLarge && RefCounted::refs(ml_.data_) > 1;
   }
 
-#ifdef FBSTRING_PERVERSE
-  enum { TERMINATOR = '^' };
-#else
-  enum { TERMINATOR = '\0' };
-#endif
-
   void writeTerminator() {
-#if defined(FBSTRING_PERVERSE) || defined(FBSTRING_CONSERVATIVE)
-    if (category() == isSmall) {
+    if (category() == Category::isSmall) {
       const auto s = smallSize();
       if (s != maxSmallSize) {
-        small_[s] = TERMINATOR;
+        small_[s] = '\0';
       }
     } else {
-      ml_.data_[ml_.size_] = TERMINATOR;
+      ml_.data_[ml_.size_] = '\0';
     }
-#endif
   }
 
 private:
@@ -846,11 +806,11 @@ private:
   };
 
   union {
-    mutable Char small_[sizeof(MediumLarge) / sizeof(Char)];
-    mutable MediumLarge ml_;
+    Char small_[sizeof(MediumLarge) / sizeof(Char)];
+    MediumLarge ml_;
   };
 
-  enum {
+  enum : size_t {
     lastChar = sizeof(MediumLarge) - 1,
     maxSmallSize = lastChar / sizeof(Char),
     maxMediumSize = 254 / sizeof(Char),            // coincides with the small
@@ -861,7 +821,10 @@ private:
   static_assert(!(sizeof(MediumLarge) % sizeof(Char)),
                 "Corrupt memory layout for fbstring.");
 
-  enum Category {
+  typedef std::conditional<sizeof(size_t) == 4, uint32_t, uint64_t>::type
+          category_type;
+
+  enum class Category : category_type {
     isSmall = 0,
     isMedium = sizeof(size_t) == 4 ? 0x80000000 : 0x8000000000000000,
     isLarge =  sizeof(size_t) == 4 ? 0x40000000 : 0x4000000000000000,
@@ -873,7 +836,7 @@ private:
   }
 
   size_t smallSize() const {
-    assert(category() == isSmall &&
+    assert(category() == Category::isSmall &&
            static_cast<size_t>(small_[maxSmallSize])
            <= static_cast<size_t>(maxSmallSize));
     return static_cast<size_t>(maxSmallSize)
@@ -886,6 +849,7 @@ private:
     // small_[maxSmallSize].
     assert(s <= maxSmallSize);
     small_[maxSmallSize] = maxSmallSize - s;
+    writeTerminator();
   }
 };
 
@@ -979,7 +943,7 @@ class basic_fbstring {
       size() <= max_size() &&
       capacity() <= max_size() &&
       size() <= capacity() &&
-      (begin()[size()] == Storage::TERMINATOR || begin()[size()] == '\0');
+      begin()[size()] == '\0';
   }
 
   struct Invariant;
@@ -1035,7 +999,7 @@ private:
 
 public:
   // C++11 21.4.2 construct/copy/destroy
-  explicit basic_fbstring(const A& a = A()) noexcept {
+  explicit basic_fbstring(const A& /*a*/ = A()) noexcept {
   }
 
   basic_fbstring(const basic_fbstring& str)
@@ -1059,21 +1023,19 @@ public:
     assign(str, pos, n);
   }
 
-  /* implicit */ basic_fbstring(const value_type* s, const A& a = A())
+  /* implicit */ basic_fbstring(const value_type* s, const A& /*a*/ = A())
       : store_(s, s
           ? traits_type::length(s)
-          : [] {
-              std::__throw_logic_error(
-                "basic_fbstring: null pointer initializer not valid");
-              return 0;
-            }()) {
+          : (std::__throw_logic_error(
+                "basic_fbstring: null pointer initializer not valid"),
+             0)) {
   }
 
-  basic_fbstring(const value_type* s, size_type n, const A& a = A())
+  basic_fbstring(const value_type* s, size_type n, const A& /*a*/ = A())
       : store_(s, n) {
   }
 
-  basic_fbstring(size_type n, value_type c, const A& a = A()) {
+  basic_fbstring(size_type n, value_type c, const A& /*a*/ = A()) {
     auto const data = store_.expand_noinit(n);
     fbstring_detail::pod_fill(data, data + n, c);
     store_.writeTerminator();
@@ -1083,7 +1045,7 @@ public:
   basic_fbstring(InIt begin, InIt end,
                  typename std::enable_if<
                  !std::is_same<typename std::remove_const<InIt>::type,
-                 value_type*>::value, const A>::type & a = A()) {
+                 value_type*>::value, const A>::type & /*a*/ = A()) {
     assign(begin, end);
   }
 
@@ -1295,14 +1257,10 @@ public:
 
   // C++11 21.4.5 element access:
   const_reference operator[](size_type pos) const {
-    return *(c_str() + pos);
+    return *(begin() + pos);
   }
 
   reference operator[](size_type pos) {
-    if (pos == size()) {
-      // Just call c_str() to make sure '\0' is present
-      c_str();
-    }
     return *(begin() + pos);
   }
 
@@ -2011,9 +1969,16 @@ public:
     return find_last_not_of(&c, pos, 1);
   }
 
-  basic_fbstring substr(size_type pos = 0, size_type n = npos) const {
+  basic_fbstring substr(size_type pos = 0, size_type n = npos) const& {
     enforce(pos <= size(), std::__throw_out_of_range, "");
     return basic_fbstring(data() + pos, std::min(n, size() - pos));
+  }
+
+  basic_fbstring substr(size_type pos = 0, size_type n = npos) && {
+    enforce(pos <= size(), std::__throw_out_of_range, "");
+    erase(0, pos);
+    if (n < size()) resize(n);
+    return std::move(*this);
   }
 
   int compare(const basic_fbstring& str) const {
@@ -2063,7 +2028,7 @@ private:
 };
 
 // non-member functions
-// C++11 21.4.8.1/2
+// C++11 21.4.8.1/1
 template <typename E, class T, class A, class S>
 inline
 basic_fbstring<E, T, A, S> operator+(const basic_fbstring<E, T, A, S>& lhs,
@@ -2105,24 +2070,44 @@ basic_fbstring<E, T, A, S> operator+(basic_fbstring<E, T, A, S>&& lhs,
   return std::move(lhs.append(rhs));
 }
 
+// C++11 21.4.8.1/5
 template <typename E, class T, class A, class S>
 inline
 basic_fbstring<E, T, A, S> operator+(
-  const typename basic_fbstring<E, T, A, S>::value_type* lhs,
+  const E* lhs,
   const basic_fbstring<E, T, A, S>& rhs) {
   //
   basic_fbstring<E, T, A, S> result;
-  const typename basic_fbstring<E, T, A, S>::size_type len =
-    basic_fbstring<E, T, A, S>::traits_type::length(lhs);
+  const auto len = basic_fbstring<E, T, A, S>::traits_type::length(lhs);
   result.reserve(len + rhs.size());
   result.append(lhs, len).append(rhs);
   return result;
 }
 
+// C++11 21.4.8.1/6
 template <typename E, class T, class A, class S>
 inline
 basic_fbstring<E, T, A, S> operator+(
-  typename basic_fbstring<E, T, A, S>::value_type lhs,
+  const E* lhs,
+  basic_fbstring<E, T, A, S>&& rhs) {
+  //
+  const auto len = basic_fbstring<E, T, A, S>::traits_type::length(lhs);
+  if (rhs.capacity() >= len + rhs.size()) {
+    // Good, at least we don't need to reallocate
+    return std::move(rhs.insert(rhs.begin(), lhs, lhs + len));
+  }
+  // Meh, no go. Do it by hand since we have len already.
+  basic_fbstring<E, T, A, S> result;
+  result.reserve(len + rhs.size());
+  result.append(lhs, len).append(rhs);
+  return result;
+}
+
+// C++11 21.4.8.1/7
+template <typename E, class T, class A, class S>
+inline
+basic_fbstring<E, T, A, S> operator+(
+  E lhs,
   const basic_fbstring<E, T, A, S>& rhs) {
 
   basic_fbstring<E, T, A, S> result;
@@ -2132,11 +2117,28 @@ basic_fbstring<E, T, A, S> operator+(
   return result;
 }
 
+// C++11 21.4.8.1/8
+template <typename E, class T, class A, class S>
+inline
+basic_fbstring<E, T, A, S> operator+(
+  E lhs,
+  basic_fbstring<E, T, A, S>&& rhs) {
+  //
+  if (rhs.capacity() > rhs.size()) {
+    // Good, at least we don't need to reallocate
+    return std::move(rhs.insert(rhs.begin(), lhs));
+  }
+  // Meh, no go. Forward to operator+(E, const&).
+  auto const& rhsC = rhs;
+  return lhs + rhsC;
+}
+
+// C++11 21.4.8.1/9
 template <typename E, class T, class A, class S>
 inline
 basic_fbstring<E, T, A, S> operator+(
   const basic_fbstring<E, T, A, S>& lhs,
-  const typename basic_fbstring<E, T, A, S>::value_type* rhs) {
+  const E* rhs) {
 
   typedef typename basic_fbstring<E, T, A, S>::size_type size_type;
   typedef typename basic_fbstring<E, T, A, S>::traits_type traits_type;
@@ -2148,17 +2150,38 @@ basic_fbstring<E, T, A, S> operator+(
   return result;
 }
 
+// C++11 21.4.8.1/10
+template <typename E, class T, class A, class S>
+inline
+basic_fbstring<E, T, A, S> operator+(
+  basic_fbstring<E, T, A, S>&& lhs,
+  const E* rhs) {
+  //
+  return std::move(lhs += rhs);
+}
+
+// C++11 21.4.8.1/11
 template <typename E, class T, class A, class S>
 inline
 basic_fbstring<E, T, A, S> operator+(
   const basic_fbstring<E, T, A, S>& lhs,
-  typename basic_fbstring<E, T, A, S>::value_type rhs) {
+  E rhs) {
 
   basic_fbstring<E, T, A, S> result;
   result.reserve(lhs.size() + 1);
   result.append(lhs);
   result.push_back(rhs);
   return result;
+}
+
+// C++11 21.4.8.1/12
+template <typename E, class T, class A, class S>
+inline
+basic_fbstring<E, T, A, S> operator+(
+  basic_fbstring<E, T, A, S>&& lhs,
+  E rhs) {
+  //
+  return std::move(lhs += rhs);
 }
 
 template <typename E, class T, class A, class S>
@@ -2295,19 +2318,19 @@ std::basic_istream<
   auto err = __ios_base::goodbit;
   if (sentry) {
     auto n = is.width();
-    if (n == 0) {
+    if (n <= 0) {
       n = str.max_size();
     }
     str.erase();
-    auto got = is.rdbuf()->sgetc();
-    for (; extracted != n && got != T::eof() && !isspace(got); ++extracted) {
-      // Whew. We get to store this guy
+    for (auto got = is.rdbuf()->sgetc(); extracted != size_t(n); ++extracted) {
+      if (got == T::eof()) {
+        err |= __ios_base::eofbit;
+        is.width(0);
+        break;
+      }
+      if (isspace(got)) break;
       str.push_back(got);
       got = is.rdbuf()->snextc();
-    }
-    if (got == T::eof()) {
-      err |= __ios_base::eofbit;
-      is.width(0);
     }
   }
   if (!extracted) {
@@ -2347,6 +2370,9 @@ operator<<(
       os.setstate(std::ios_base::badbit | std::ios_base::failbit);
     }
   }
+#elif defined(_MSC_VER)
+  // MSVC doesn't define __ostream_insert
+  os.write(str.data(), str.size());
 #else
   std::__ostream_insert(os, str.data(), str.size());
 #endif
@@ -2460,43 +2486,41 @@ _GLIBCXX_END_NAMESPACE_VERSION
 //
 // Handle interaction with different C++ standard libraries, which
 // expect these types to be in different namespaces.
+
+#define FOLLY_FBSTRING_HASH1(T) \
+  template <> \
+  struct hash< ::folly::basic_fbstring<T> > { \
+    size_t operator()(const ::folly::fbstring& s) const { \
+      return ::folly::hash::fnv32_buf(s.data(), s.size()); \
+    } \
+  };
+
+// The C++11 standard says that these four are defined
+#define FOLLY_FBSTRING_HASH \
+  FOLLY_FBSTRING_HASH1(char) \
+  FOLLY_FBSTRING_HASH1(char16_t) \
+  FOLLY_FBSTRING_HASH1(char32_t) \
+  FOLLY_FBSTRING_HASH1(wchar_t)
+
 namespace std {
 
-template <class C>
-struct hash<folly::basic_fbstring<C> > : private hash<const C*> {
-  size_t operator()(const folly::basic_fbstring<C> & s) const {
-    return hash<const C*>::operator()(s.c_str());
-  }
-};
+FOLLY_FBSTRING_HASH
 
-template <>
-struct hash< ::folly::fbstring> {
-  size_t operator()(const ::folly::fbstring& s) const {
-    return ::folly::hash::fnv32_buf(s.data(), s.size());
-  }
-};
+}  // namespace std
 
-}
-
+#if FOLLY_HAVE_DEPRECATED_ASSOC
 #if defined(_GLIBCXX_SYMVER) && !defined(__BIONIC__)
 namespace __gnu_cxx {
 
-template <class C>
-struct hash<folly::basic_fbstring<C> > : private hash<const C*> {
-  size_t operator()(const folly::basic_fbstring<C> & s) const {
-    return hash<const C*>::operator()(s.c_str());
-  }
-};
+FOLLY_FBSTRING_HASH
 
-template <>
-struct hash< ::folly::fbstring> {
-  size_t operator()(const ::folly::fbstring& s) const {
-    return ::folly::hash::fnv32_buf(s.data(), s.size());
-  }
-};
-
-}
+}  // namespace __gnu_cxx
 #endif // _GLIBCXX_SYMVER && !__BIONIC__
+#endif // FOLLY_HAVE_DEPRECATED_ASSOC
+
+#undef FOLLY_FBSTRING_HASH
+#undef FOLLY_FBSTRING_HASH1
+
 #endif // _LIBSTDCXX_FBSTRING
 
 #pragma GCC diagnostic pop

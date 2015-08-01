@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/File.h"
+#include <folly/File.h>
 
 #include <mutex>
 
@@ -22,11 +22,11 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include "folly/Benchmark.h"
-#include "folly/String.h"
-#include "folly/Subprocess.h"
-#include "folly/experimental/io/FsUtil.h"
-#include "folly/experimental/TestUtil.h"
+#include <folly/Benchmark.h>
+#include <folly/String.h>
+#include <folly/Subprocess.h>
+#include <folly/experimental/io/FsUtil.h>
+#include <folly/experimental/TestUtil.h>
 
 using namespace folly;
 using namespace folly::test;
@@ -53,6 +53,15 @@ TEST(File, Simple) {
     f.close();
     EXPECT_EQ(-1, f.fd());
   }
+}
+
+TEST(File, SimpleStringPiece) {
+  char buf = 'x';
+  File f(StringPiece("/etc/hosts"));
+  EXPECT_NE(-1, f.fd());
+  EXPECT_EQ(1, ::read(f.fd(), &buf, 1));
+  f.close();
+  EXPECT_EQ(-1, f.fd());
 }
 
 TEST(File, OwnsFd) {
@@ -147,9 +156,21 @@ TEST(File, Locks) {
   CHECK_ERR(r);
   buf[r] = '\0';
 
-  fs::path helper(buf);
-  helper.remove_filename();
-  helper /= "file_test_lock_helper";
+  // NOTE(agallagher): Our various internal build systems layout built
+  // binaries differently, so the two layouts below.
+  fs::path me(buf);
+  auto helper_basename = "file_test_lock_helper";
+  fs::path helper;
+  if (fs::exists(me.parent_path() / helper_basename)) {
+    helper = me.parent_path() / helper_basename;
+  } else if (fs::exists(
+      me.parent_path().parent_path() / helper_basename / helper_basename)) {
+    helper = me.parent_path().parent_path()
+      / helper_basename / helper_basename;
+  } else {
+    throw std::runtime_error(
+      folly::to<std::string>("cannot find helper ", helper_basename));
+  }
 
   TemporaryFile tempFile;
   File f(tempFile.fd());
@@ -209,4 +230,3 @@ TEST(File, Locks) {
     testLock(SHARED, true);
   }
 }
-

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,14 +14,12 @@
  * limitations under the License.
  */
 
-#include "folly/json.h"
+#include <folly/json.h>
+
 #include <gtest/gtest.h>
 #include <gflags/gflags.h>
-#include <cmath>
 #include <limits>
-#include <iostream>
 #include <boost/next_prior.hpp>
-#include "folly/Benchmark.h"
 
 using folly::dynamic;
 using folly::parseJson;
@@ -79,7 +77,10 @@ TEST(Json, Parse) {
   // case matters
   EXPECT_THROW(parseJson("infinity"), std::runtime_error);
   EXPECT_THROW(parseJson("inf"), std::runtime_error);
+  EXPECT_THROW(parseJson("Inf"), std::runtime_error);
+  EXPECT_THROW(parseJson("INF"), std::runtime_error);
   EXPECT_THROW(parseJson("nan"), std::runtime_error);
+  EXPECT_THROW(parseJson("NAN"), std::runtime_error);
 
   auto array = parseJson(
     "[12,false, false  , null , [12e4,32, [], 12]]");
@@ -171,6 +172,14 @@ TEST(Json, Produce) {
   // We're not allowed to have non-string keys in json.
   EXPECT_THROW(toJson(dynamic::object("abc", "xyz")(42.33, "asd")),
                std::runtime_error);
+
+  // Check Infinity/Nan
+  folly::json::serialization_opts opts;
+  opts.allow_nan_inf = true;
+  EXPECT_EQ("Infinity",
+            folly::json::serialize(parseJson("Infinity"), opts).toStdString());
+  EXPECT_EQ("NaN",
+            folly::json::serialize(parseJson("NaN"), opts).toStdString());
 }
 
 TEST(Json, JsonEscape) {
@@ -379,109 +388,8 @@ TEST(Json, SortKeys) {
   EXPECT_EQ(sorted_keys, folly::json::serialize(value, opts_on));
 }
 
-BENCHMARK(jsonSerialize, iters) {
-  folly::json::serialization_opts opts;
-  for (int i = 0; i < iters; ++i) {
-    folly::json::serialize(
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy",
-      opts);
-  }
-}
-
-BENCHMARK(jsonSerializeWithNonAsciiEncoding, iters) {
-  folly::json::serialization_opts opts;
-  opts.encode_non_ascii = true;
-
-  for (int i = 0; i < iters; ++i) {
-    folly::json::serialize(
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy",
-      opts);
-  }
-}
-
-BENCHMARK(jsonSerializeWithUtf8Validation, iters) {
-  folly::json::serialization_opts opts;
-  opts.validate_utf8 = true;
-
-  for (int i = 0; i < iters; ++i) {
-    folly::json::serialize(
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy"
-      "qwerty \xc2\x80 \xef\xbf\xbf poiuy",
-      opts);
-  }
-}
-
-BENCHMARK(parseSmallStringWithUtf, iters) {
-  for (int i = 0; i < iters << 4; ++i) {
-    parseJson("\"I \\u2665 UTF-8 thjasdhkjh blah blah blah\"");
-  }
-}
-
-BENCHMARK(parseNormalString, iters) {
-  for (int i = 0; i < iters << 4; ++i) {
-    parseJson("\"akjhfk jhkjlakjhfk jhkjlakjhfk jhkjl akjhfk\"");
-  }
-}
-
-BENCHMARK(parseBigString, iters) {
-  for (int i = 0; i < iters; ++i) {
-    parseJson("\""
-      "akjhfk jhkjlakjhfk jhkjlakjhfk jhkjl akjhfk"
-      "akjhfk jhkjlakjhfk jhkjlakjhfk jhkjl akjhfk"
-      "akjhfk jhkjlakjhfk jhkjlakjhfk jhkjl akjhfk"
-      "akjhfk jhkjlakjhfk jhkjlakjhfk jhkjl akjhfk"
-      "akjhfk jhkjlakjhfk jhkjlakjhfk jhkjl akjhfk"
-      "akjhfk jhkjlakjhfk jhkjlakjhfk jhkjl akjhfk"
-      "akjhfk jhkjlakjhfk jhkjlakjhfk jhkjl akjhfk"
-      "akjhfk jhkjlakjhfk jhkjlakjhfk jhkjl akjhfk"
-      "akjhfk jhkjlakjhfk jhkjlakjhfk jhkjl akjhfk"
-      "akjhfk jhkjlakjhfk jhkjlakjhfk jhkjl akjhfk"
-      "akjhfk jhkjlakjhfk jhkjlakjhfk jhkjl akjhfk"
-      "\"");
-  }
-}
-
-BENCHMARK(toJson, iters) {
-  dynamic something = parseJson(
-    "{\"old_value\":40,\"changed\":true,\"opened\":false,\"foo\":[1,2,3,4,5,6]}"
-  );
-
-  for (int i = 0; i < iters; i++) {
-    toJson(something);
-  }
-}
-
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
-  if (FLAGS_benchmark) {
-    folly::runBenchmarks();
-  }
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   return RUN_ALL_TESTS();
 }

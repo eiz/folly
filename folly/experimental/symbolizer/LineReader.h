@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 
 #include <boost/noncopyable.hpp>
 
-#include "folly/Range.h"
+#include <folly/Range.h>
 
 namespace folly { namespace symbolizer {
 
@@ -88,4 +88,3 @@ class LineReader : private boost::noncopyable {
 }}  // namespaces
 
 #endif /* FOLLY_SYMBOLIZER_LINEREADER_H_ */
-

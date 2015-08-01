@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,15 +14,16 @@
  * limitations under the License.
  */
 
-#include "folly/File.h"
+#include <folly/File.h>
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/file.h>
 
-#include "folly/Exception.h"
-#include "folly/FileUtil.h"
-#include "folly/Format.h"
-#include "folly/ScopeGuard.h"
+#include <folly/Exception.h>
+#include <folly/FileUtil.h>
+#include <folly/Format.h>
+#include <folly/ScopeGuard.h>
 
 #include <system_error>
 
@@ -52,7 +53,13 @@ File::File(const char* name, int flags, mode_t mode)
   ownsFd_ = true;
 }
 
-File::File(File&& other)
+File::File(const std::string& name, int flags, mode_t mode)
+  : File(name.c_str(), flags, mode) {}
+
+File::File(StringPiece name, int flags, mode_t mode)
+  : File(name.str(), flags, mode) {}
+
+File::File(File&& other) noexcept
   : fd_(other.fd_)
   , ownsFd_(other.ownsFd_) {
   other.release();
@@ -65,7 +72,11 @@ File& File::operator=(File&& other) {
 }
 
 File::~File() {
-  closeNoThrow();  // ignore error
+  auto fd = fd_;
+  if (!closeNoThrow()) {  // ignore most errors
+    DCHECK_NE(errno, EBADF) << "closing fd " << fd << ", it may already "
+      << "have been closed. Another time, this might close the wrong FD.";
+  }
 }
 
 /* static */ File File::temporary() {
@@ -80,7 +91,7 @@ File::~File() {
   return File(fd, true);
 }
 
-int File::release() {
+int File::release() noexcept {
   int released = fd_;
   fd_ = -1;
   ownsFd_ = false;

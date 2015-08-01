@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,11 +90,11 @@
 #include <functional>
 #include <atomic>
 
-#include "folly/AtomicHashArray.h"
-#include "folly/Foreach.h"
-#include "folly/Hash.h"
-#include "folly/Likely.h"
-#include "folly/ThreadCachedInt.h"
+#include <folly/AtomicHashArray.h>
+#include <folly/Foreach.h>
+#include <folly/Hash.h>
+#include <folly/Likely.h>
+#include <folly/ThreadCachedInt.h>
 
 namespace folly {
 
@@ -318,17 +318,21 @@ class AtomicHashMap : boost::noncopyable {
   }
 
   iterator begin() {
-    return iterator(this, 0,
+    iterator it(this, 0,
       subMaps_[0].load(std::memory_order_relaxed)->begin());
+    it.checkAdvanceToNextSubmap();
+    return it;
+  }
+
+  const_iterator begin() const {
+    const_iterator it(this, 0,
+      subMaps_[0].load(std::memory_order_relaxed)->begin());
+    it.checkAdvanceToNextSubmap();
+    return it;
   }
 
   iterator end() {
     return iterator();
-  }
-
-  const_iterator begin() const {
-    return const_iterator(this, 0,
-      subMaps_[0].load(std::memory_order_relaxed)->begin());
   }
 
   const_iterator end() const {
@@ -381,11 +385,11 @@ class AtomicHashMap : boost::noncopyable {
   static const uint32_t  kSubMapIndexShift_  = 32 - kNumSubMapBits_ - 1;
   static const uint32_t  kSubMapIndexMask_   = (1 << kSubMapIndexShift_) - 1;
   static const uint32_t  kNumSubMaps_        = 1 << kNumSubMapBits_;
-  static const uintptr_t kLockedPtr_         = 0x88ul << 48; // invalid pointer
+  static const uintptr_t kLockedPtr_         = 0x88ULL << 48; // invalid pointer
 
   struct SimpleRetT { uint32_t i; size_t j; bool success;
     SimpleRetT(uint32_t ii, size_t jj, bool s) : i(ii), j(jj), success(s) {}
-    SimpleRetT() {}
+    SimpleRetT() = default;
   };
 
   template <class T>
@@ -410,6 +414,6 @@ class AtomicHashMap : boost::noncopyable {
 
 } // namespace folly
 
-#include "AtomicHashMap-inl.h"
+#include <folly/AtomicHashMap-inl.h>
 
 #endif // FOLLY_ATOMICHASHMAP_H_

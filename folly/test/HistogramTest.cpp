@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#include "folly/stats/Histogram.h"
-#include "folly/stats/Histogram-defs.h"
+#include <folly/stats/Histogram.h>
+#include <folly/stats/Histogram-defs.h>
 
 #include <gflags/gflags.h>
 #include <gtest/gtest.h>
@@ -202,4 +202,23 @@ TEST(Histogram, TestDoubleWidthTooBig) {
   h.addValue(7.5);
   EXPECT_EQ(1, h.getBucketByIndex(2).count);
   EXPECT_EQ(3.0, h.getPercentileEstimate(0.5));
+}
+
+// Test that we get counts right
+TEST(Histogram, Counts) {
+  Histogram<int32_t> h(1, 0, 10);
+  EXPECT_EQ(12, h.getNumBuckets());
+  EXPECT_EQ(0, h.computeTotalCount());
+
+  // Add one to each bucket, make sure the counts match
+  for (int32_t i = 0; i < 10; i++) {
+    h.addValue(i);
+    EXPECT_EQ(i+1, h.computeTotalCount());
+  }
+
+  // Add a lot to one bucket, make sure the counts still make sense
+  for (int32_t i = 0; i < 100; i++) {
+    h.addValue(0);
+  }
+  EXPECT_EQ(110, h.computeTotalCount());
 }

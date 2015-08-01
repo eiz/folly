@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 #ifndef FOLLY_PACKEDSYNCPTR_H_
 #define FOLLY_PACKEDSYNCPTR_H_
 
-#include "folly/Portability.h"
+#include <folly/Portability.h>
 
 #if !FOLLY_X64
 # error "PackedSyncPtr is x64-specific code."
@@ -53,7 +53,7 @@
  * @author Jordan DeLong <delong.j@fb.com>
  */
 
-#include "folly/SmallLocks.h"
+#include <folly/SmallLocks.h>
 #include <type_traits>
 #include <glog/logging.h>
 
@@ -149,4 +149,3 @@ static_assert(sizeof(PackedSyncPtr<void>) == 8,
 }
 
 #endif
-

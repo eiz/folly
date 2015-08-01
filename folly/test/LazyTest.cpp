@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "folly/Lazy.h"
+#include <folly/Lazy.h>
 
 #include <map>
 #include <functional>
@@ -27,7 +27,8 @@ TEST(Lazy, Simple) {
   int computeCount = 0;
 
   auto const val = folly::lazy([&]() -> int {
-    EXPECT_EQ(++computeCount, 1);
+    ++computeCount;
+    EXPECT_EQ(computeCount, 1);
     return 12;
   });
   EXPECT_EQ(computeCount, 0);
@@ -46,7 +47,8 @@ TEST(Lazy, Simple) {
 
 auto globalCount = folly::lazy([]{ return 0; });
 auto const foo = folly::lazy([]() -> std::string {
-  EXPECT_EQ(++globalCount(), 1);
+  ++globalCount();
+  EXPECT_EQ(globalCount(), 1);
   return std::string("YEP");
 });
 
@@ -72,7 +74,7 @@ TEST(Lazy, Map) {
 struct CopyCount {
   CopyCount() {}
   CopyCount(const CopyCount&) { ++count; }
-  CopyCount(CopyCount&&)      {}
+  CopyCount(CopyCount&&) noexcept {}
 
   static int count;
 
@@ -105,4 +107,3 @@ TEST(Lazy, Consty) {
 }
 
 }
-

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,9 +37,9 @@
 #ifndef FOLLY_THREADLOCAL_H_
 #define FOLLY_THREADLOCAL_H_
 
-#include "folly/Portability.h"
+#include <folly/Portability.h>
 #include <boost/iterator/iterator_facade.hpp>
-#include "folly/Likely.h"
+#include <folly/Likely.h>
 #include <type_traits>
 
 
@@ -50,7 +50,7 @@ enum class TLPDestructionMode {
 };
 }  // namespace
 
-#include "folly/detail/ThreadLocalDetail.h"
+#include <folly/detail/ThreadLocalDetail.h>
 
 namespace folly {
 
@@ -59,7 +59,7 @@ template<class T, class Tag> class ThreadLocalPtr;
 template<class T, class Tag=void>
 class ThreadLocal {
  public:
-  ThreadLocal() { }
+  ThreadLocal() = default;
 
   T* get() const {
     T* ptr = tlp_.get();
@@ -137,7 +137,7 @@ class ThreadLocalPtr {
  public:
   ThreadLocalPtr() : id_(threadlocal_detail::StaticMeta<Tag>::create()) { }
 
-  ThreadLocalPtr(ThreadLocalPtr&& other) : id_(other.id_) {
+  ThreadLocalPtr(ThreadLocalPtr&& other) noexcept : id_(other.id_) {
     other.id_ = 0;
   }
 
@@ -163,6 +163,13 @@ class ThreadLocalPtr {
 
   T& operator*() const {
     return *get();
+  }
+
+  T* release() {
+    threadlocal_detail::ElementWrapper& w =
+      threadlocal_detail::StaticMeta<Tag>::get(id_);
+
+    return static_cast<T*>(w.release());
   }
 
   void reset(T* newPtr = nullptr) {
@@ -203,7 +210,7 @@ class ThreadLocalPtr {
 
     threadlocal_detail::StaticMeta<Tag>& meta_;
     std::mutex* lock_;
-    int id_;
+    uint32_t id_;
 
    public:
     class Iterator;
@@ -302,7 +309,7 @@ class ThreadLocalPtr {
     }
 
    private:
-    explicit Accessor(int id)
+    explicit Accessor(uint32_t id)
       : meta_(threadlocal_detail::StaticMeta<Tag>::instance()),
         lock_(&meta_.lock_) {
       lock_->lock();
@@ -337,7 +344,7 @@ class ThreadLocalPtr {
   ThreadLocalPtr(const ThreadLocalPtr&) = delete;
   ThreadLocalPtr& operator=(const ThreadLocalPtr&) = delete;
 
-  int id_;  // every instantiation has a unique id
+  uint32_t id_;  // every instantiation has a unique id
 };
 
 }  // namespace folly

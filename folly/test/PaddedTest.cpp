@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/Padded.h"
+#include <folly/Padded.h>
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
@@ -84,11 +84,11 @@ class IntPaddedTestBase : public ::testing::Test {
 
 class IntPaddedConstTest : public IntPaddedTestBase {
  protected:
-  void SetUp() {
+  void SetUp() override {
     v_.resize(4);
     n_ = 0;
     for (int i = 0; i < 4; i++) {
-      for (int j = 0; j < IntNode::kElementCount; ++j, ++n_) {
+      for (size_t j = 0; j < IntNode::kElementCount; ++j, ++n_) {
         v_[i].data()[j] = n_;
       }
     }
@@ -160,7 +160,7 @@ TEST_F(IntPaddedNonConstTest, Iteration) {
 
   k = 0;
   for (int i = 0; i < 4; i++) {
-    for (int j = 0; j < IntNode::kElementCount; ++j, ++k) {
+    for (size_t j = 0; j < IntNode::kElementCount; ++j, ++k) {
       EXPECT_EQ(k, v_[i].data()[j]);
     }
   }
@@ -181,11 +181,11 @@ class StructPaddedTestBase : public ::testing::Test {
 
 class StructPaddedConstTest : public StructPaddedTestBase {
  protected:
-  void SetUp() {
+  void SetUp() override {
     v_.resize(4);
     n_ = 0;
     for (int i = 0; i < 4; i++) {
-      for (int j = 0; j < PointNode::kElementCount; ++j, ++n_) {
+      for (size_t j = 0; j < PointNode::kElementCount; ++j, ++n_) {
         auto& point = v_[i].data()[j];
         point.x = n_;
         point.y = n_ + 1;
@@ -239,4 +239,3 @@ TEST_F(IntAdaptorTest, ResizeConstructor) {
     EXPECT_EQ(42, a[i]);
   }
 }
-

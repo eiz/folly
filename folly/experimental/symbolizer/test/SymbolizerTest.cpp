@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-#include "folly/experimental/symbolizer/Symbolizer.h"
+#include <folly/experimental/symbolizer/Symbolizer.h>
 
 #include <cstdlib>
 
 #include <gtest/gtest.h>
 
-#include "folly/Range.h"
-#include "folly/String.h"
+#include <folly/Range.h>
+#include <folly/String.h>
 
 namespace folly { namespace symbolizer { namespace test {
 
@@ -32,16 +32,25 @@ TEST(Symbolizer, Single) {
   Symbolizer symbolizer;
   SymbolizedFrame a;
   ASSERT_TRUE(symbolizer.symbolize(reinterpret_cast<uintptr_t>(foo), a));
-  EXPECT_EQ("folly::symbolizer::test::foo()",
-            demangle(a.name.str().c_str()));
+  EXPECT_EQ("folly::symbolizer::test::foo()", a.demangledName());
 
-  auto path = a.location.file.toString();
-  folly::StringPiece basename(path);
-  auto pos = basename.rfind('/');
-  if (pos != folly::StringPiece::npos) {
-    basename.advance(pos + 1);
+  // The version of clang we use doesn't generate a `.debug_aranges` section,
+  // which the symbolizer needs to lookup the filename.
+  constexpr bool built_with_clang =
+    #ifdef __clang__
+      true;
+    #else
+      false;
+    #endif
+  if (!built_with_clang) {
+    auto path = a.location.file.toString();
+    folly::StringPiece basename(path);
+    auto pos = basename.rfind('/');
+    if (pos != folly::StringPiece::npos) {
+      basename.advance(pos + 1);
+    }
+    EXPECT_EQ("SymbolizerTest.cpp", basename.str());
   }
-  EXPECT_EQ("SymbolizerTest.cpp", basename.str());
 }
 
 FrameArray<100> goldenFrames;
@@ -65,7 +74,7 @@ void bar() {
 
 class ElfCacheTest : public testing::Test {
  protected:
-  void SetUp();
+  void SetUp() override;
 };
 
 // Capture "golden" stack trace with default-configured Symbolizer
@@ -80,14 +89,12 @@ void ElfCacheTest::SetUp() {
 void runElfCacheTest(Symbolizer& symbolizer) {
   FrameArray<100> frames = goldenFrames;
   for (size_t i = 0; i < frames.frameCount; ++i) {
-    auto& f = frames.frames[i];
-    f.found = false;
-    f.name.clear();
+    frames.frames[i].clear();
   }
   symbolizer.symbolize(frames);
   ASSERT_LE(4, frames.frameCount);
   for (size_t i = 1; i < 4; ++i) {
-    EXPECT_EQ(goldenFrames.frames[i].name, frames.frames[i].name);
+    EXPECT_STREQ(goldenFrames.frames[i].name, frames.frames[i].name);
   }
 }
 

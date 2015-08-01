@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,8 @@
 #ifndef FOLLY_URI_H_
 #define FOLLY_URI_H_
 
-#include "folly/String.h"
+#include <folly/String.h>
+#include <vector>
 
 namespace folly {
 
@@ -75,21 +76,48 @@ class Uri {
   std::string str() const { return toString<std::string>(); }
   fbstring fbstr() const { return toString<fbstring>(); }
 
-  void setPort(uint16_t port) {port_ = port;}
+  void setPort(uint16_t port) {
+    hasAuthority_ = true;
+    port_ = port;
+  }
+
+  /**
+   * Get query parameters as key-value pairs.
+   * e.g. for URI containing query string:  key1=foo&key2=&key3&=bar&=bar=
+   * In returned list, there are 3 entries:
+   *     "key1" => "foo"
+   *     "key2" => ""
+   *     "key3" => ""
+   * Parts "=bar" and "=bar=" are ignored, as they are not valid query
+   * parameters. "=bar" is missing parameter name, while "=bar=" has more than
+   * one equal signs, we don't know which one is the delimiter for key and
+   * value.
+   *
+   * Note, this method is not thread safe, it might update internal state, but
+   * only the first call to this method update the state. After the first call
+   * is finished, subsequent calls to this method are thread safe.
+   *
+   * @return  query parameter key-value pairs in a vector, each element is a
+   *          pair of which the first element is parameter name and the second
+   *          one is parameter value
+   */
+  const std::vector<std::pair<fbstring, fbstring>>& getQueryParams();
 
  private:
   fbstring scheme_;
   fbstring username_;
   fbstring password_;
   fbstring host_;
+  bool hasAuthority_;
   uint16_t port_;
   fbstring path_;
   fbstring query_;
   fbstring fragment_;
+  std::vector<std::pair<fbstring, fbstring>> queryParams_;
 };
 
 }  // namespace folly
 
-#include "folly/Uri-inl.h"
+#include <folly/Uri-inl.h>
 
 #endif /* FOLLY_URI_H_ */

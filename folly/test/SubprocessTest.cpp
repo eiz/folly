@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/Subprocess.h"
+#include <folly/Subprocess.h>
 
 #include <unistd.h>
 #include <sys/types.h>
@@ -24,14 +24,15 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include "folly/Exception.h"
-#include "folly/Format.h"
-#include "folly/FileUtil.h"
-#include "folly/String.h"
-#include "folly/gen/Base.h"
-#include "folly/gen/File.h"
-#include "folly/gen/String.h"
-#include "folly/experimental/io/FsUtil.h"
+#include <folly/Exception.h>
+#include <folly/Format.h>
+#include <folly/FileUtil.h>
+#include <folly/String.h>
+#include <folly/gen/Base.h>
+#include <folly/gen/File.h>
+#include <folly/gen/String.h>
+#include <folly/experimental/TestUtil.h>
+#include <folly/experimental/io/FsUtil.h>
 
 using namespace folly;
 
@@ -53,6 +54,21 @@ TEST(SimpleSubprocessTest, ExitsWithError) {
 TEST(SimpleSubprocessTest, ExitsWithErrorChecked) {
   Subprocess proc(std::vector<std::string>{ "/bin/false" });
   EXPECT_THROW(proc.waitChecked(), CalledProcessError);
+}
+
+TEST(SimpleSubprocessTest, DefaultConstructibleProcessReturnCode) {
+  ProcessReturnCode retcode;
+  EXPECT_TRUE(retcode.notStarted());
+}
+
+TEST(SimpleSubprocessTest, MoveSubprocess) {
+  Subprocess old_proc(std::vector<std::string>{ "/bin/true" });
+  EXPECT_TRUE(old_proc.returnCode().running());
+  auto new_proc = std::move(old_proc);
+  EXPECT_TRUE(old_proc.returnCode().notStarted());
+  EXPECT_TRUE(new_proc.returnCode().running());
+  EXPECT_EQ(0, new_proc.wait().exitStatus());
+  // Now old_proc is destroyed, but we don't crash.
 }
 
 #define EXPECT_SPAWN_ERROR(err, errMsg, cmd, ...) \
@@ -179,15 +195,12 @@ TEST(SimpleSubprocessTest, FdLeakTest) {
 
 TEST(ParentDeathSubprocessTest, ParentDeathSignal) {
   // Find out where we are.
-  static constexpr size_t pathLength = 2048;
-  char buf[pathLength + 1];
-  int r = readlink("/proc/self/exe", buf, pathLength);
-  CHECK_ERR(r);
-  buf[r] = '\0';
-
-  fs::path helper(buf);
-  helper.remove_filename();
-  helper /= "subprocess_test_parent_death_helper";
+  const auto basename = "subprocess_test_parent_death_helper";
+  auto helper = fs::executable_path();
+  helper.remove_filename() /= basename;
+  if (!fs::exists(helper)) {
+    helper = helper.parent_path().parent_path() / basename / basename;
+  }
 
   fs::path tempFile(fs::temp_directory_path() / fs::unique_path());
 
@@ -256,13 +269,21 @@ TEST(CommunicateSubprocessTest, Duplex) {
   proc.waitChecked();
 }
 
+TEST(CommunicateSubprocessTest, ProcessGroupLeader) {
+  const auto testIsLeader = "test $(cut -d ' ' -f 5 /proc/$$/stat) = $$";
+  Subprocess nonLeader(testIsLeader);
+  EXPECT_THROW(nonLeader.waitChecked(), CalledProcessError);
+  Subprocess leader(testIsLeader, Subprocess::Options().processGroupLeader());
+  leader.waitChecked();
+}
+
 TEST(CommunicateSubprocessTest, Duplex2) {
   checkFdLeak([] {
     // Pipe 200,000 lines through sed
     const size_t numCopies = 100000;
     auto iobuf = IOBuf::copyBuffer("this is a test\nanother line\n");
     IOBufQueue input;
-    for (int n = 0; n < numCopies; ++n) {
+    for (size_t n = 0; n < numCopies; ++n) {
       input.append(iobuf->clone());
     }
 
@@ -387,35 +408,70 @@ TEST(CommunicateSubprocessTest, Chatty) {
       return (wcount == lineCount);
     };
 
+    bool eofSeen = false;
+
     auto readCallback = [&] (int pfd, int cfd) -> bool {
-      EXPECT_EQ(1, cfd);  // child stdout
-      EXPECT_EQ(wcount, rcount + 1);
-
-      auto expected =
-        folly::to<std::string>("a successful test ", rcount, "\n");
-
       std::string lineBuf;
+
+      if (cfd != 1) {
+        EXPECT_EQ(2, cfd);
+        EXPECT_TRUE(readToString(pfd, lineBuf, 1));
+        EXPECT_EQ(0, lineBuf.size());
+        return true;
+      }
+
+      EXPECT_FALSE(eofSeen);
+
+      std::string expected;
+
+      if (rcount < lineCount) {
+        expected = folly::to<std::string>("a successful test ", rcount++, "\n");
+      }
+
+      EXPECT_EQ(wcount, rcount);
 
       // Not entirely kosher, we should handle partial reads, but this is
       // fine for reads <= PIPE_BUF
-      bool r = readToString(pfd, lineBuf, expected.size() + 1);
+      bool atEof = readToString(pfd, lineBuf, expected.size() + 1);
+      if (atEof) {
+        // EOF only expected after we finished reading
+        EXPECT_EQ(lineCount, rcount);
+        eofSeen = true;
+      }
 
-      EXPECT_TRUE(!r || (rcount + 1 == lineCount)); // may read EOF at end
       EXPECT_EQ(expected, lineBuf);
 
-      ++rcount;
-      if (rcount != lineCount) {
+      if (wcount != lineCount) {  // still more to write...
         proc.enableNotifications(0, true);
       }
 
-      return (rcount == lineCount);
+      return eofSeen;
     };
 
     proc.communicate(readCallback, writeCallback);
 
     EXPECT_EQ(lineCount, wcount);
     EXPECT_EQ(lineCount, rcount);
+    EXPECT_TRUE(eofSeen);
 
     EXPECT_EQ(0, proc.wait().exitStatus());
   });
+}
+
+TEST(CommunicateSubprocessTest, TakeOwnershipOfPipes) {
+  std::vector<Subprocess::ChildPipe> pipes;
+  {
+    Subprocess proc(
+      "echo $'oh\\nmy\\ncat' | wc -l &", Subprocess::pipeStdout()
+    );
+    pipes = proc.takeOwnershipOfPipes();
+    proc.waitChecked();
+  }
+  EXPECT_EQ(1, pipes.size());
+  EXPECT_EQ(1, pipes[0].childFd);
+
+  char buf[10];
+  EXPECT_EQ(2, readFull(pipes[0].pipe.fd(), buf, 10));
+  buf[2] = 0;
+  EXPECT_EQ("3\n", std::string(buf));
 }

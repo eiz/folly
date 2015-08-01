@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/SmallLocks.h"
+#include <folly/SmallLocks.h>
 #include <cassert>
 #include <cstdio>
 #include <mutex>
@@ -46,11 +46,13 @@ struct LockedVal {
 
 // Compile time test for packed struct support (requires that both of
 // these classes are POD).
-struct ignore1 { MicroSpinLock msl; int16_t foo; } __attribute__((packed));
-struct ignore2 { PicoSpinLock<uint32_t> psl; int16_t foo; }
-  __attribute__((packed));
+FOLLY_PACK_PUSH
+struct ignore1 { MicroSpinLock msl; int16_t foo; } FOLLY_PACK_ATTR;
+struct ignore2 { PicoSpinLock<uint32_t> psl; int16_t foo; } FOLLY_PACK_ATTR;
 static_assert(sizeof(ignore1) == 3, "Size check failed");
 static_assert(sizeof(ignore2) == 6, "Size check failed");
+static_assert(sizeof(MicroSpinLock) == 1, "Size check failed");
+FOLLY_PACK_POP
 
 LockedVal v;
 void splock_test() {
@@ -58,11 +60,11 @@ void splock_test() {
   const int max = 1000;
   unsigned int seed = (uintptr_t)pthread_self();
   for (int i = 0; i < max; i++) {
-    asm("pause");
+    folly::asm_pause();
     MSLGuard g(v.lock);
 
     int first = v.ar[0];
-    for (int i = 1; i < sizeof v.ar / sizeof i; ++i) {
+    for (size_t i = 1; i < sizeof v.ar / sizeof i; ++i) {
       EXPECT_EQ(first, v.ar[i]);
     }
 
@@ -82,7 +84,7 @@ template<class T> struct PslTest {
       std::lock_guard<PicoSpinLock<T>> guard(lock);
       lock.setData(ourVal);
       for (int n = 0; n < 10; ++n) {
-        asm volatile("pause");
+        folly::asm_volatile_pause();
         EXPECT_EQ(lock.getData(), ourVal);
       }
     }

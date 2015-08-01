@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#include "folly/FileUtil.h"
-#include "folly/detail/FileUtilDetail.h"
+#include <folly/FileUtil.h>
+#include <folly/detail/FileUtilDetail.h>
 
 #include <deque>
 
@@ -23,9 +23,9 @@
 #include <gflags/gflags.h>
 #include <gtest/gtest.h>
 
-#include "folly/Benchmark.h"
-#include "folly/Range.h"
-#include "folly/String.h"
+#include <folly/Benchmark.h>
+#include <folly/Range.h>
+#include <folly/String.h>
 
 namespace folly { namespace test {
 
@@ -88,7 +88,7 @@ ssize_t Reader::operator()(int fd, void* buf, size_t count) {
   if (n <= 0) {
     return n;
   }
-  if (n > count) {
+  if (size_t(n) > count) {
     throw std::runtime_error("requested count too small");
   }
   memcpy(buf, data_.data(), n);
@@ -160,7 +160,7 @@ TEST_F(FileUtilTest, read) {
   for (auto& p : readers_) {
     std::string out(in_.size(), '\0');
     EXPECT_EQ(p.first, wrapFull(p.second, 0, &out[0], out.size()));
-    if (p.first != -1) {
+    if (p.first != (typeof(p.first))(-1)) {
       EXPECT_EQ(in_.substr(0, p.first), out.substr(0, p.first));
     }
   }
@@ -170,7 +170,7 @@ TEST_F(FileUtilTest, pread) {
   for (auto& p : readers_) {
     std::string out(in_.size(), '\0');
     EXPECT_EQ(p.first, wrapFull(p.second, 0, &out[0], out.size(), off_t(42)));
-    if (p.first != -1) {
+    if (p.first != (typeof(p.first))(-1)) {
       EXPECT_EQ(in_.substr(0, p.first), out.substr(0, p.first));
     }
   }
@@ -217,7 +217,7 @@ TEST_F(FileUtilTest, readv) {
 
     auto iov = buf.iov();
     EXPECT_EQ(p.first, wrapvFull(p.second, 0, iov.data(), iov.size()));
-    if (p.first != -1) {
+    if (p.first != (typeof(p.first))(-1)) {
       EXPECT_EQ(in_.substr(0, p.first), buf.join().substr(0, p.first));
     }
   }
@@ -232,7 +232,7 @@ TEST_F(FileUtilTest, preadv) {
     auto iov = buf.iov();
     EXPECT_EQ(p.first,
               wrapvFull(p.second, 0, iov.data(), iov.size(), off_t(42)));
-    if (p.first != -1) {
+    if (p.first != (typeof(p.first))(-1)) {
       EXPECT_EQ(in_.substr(0, p.first), buf.join().substr(0, p.first));
     }
   }
@@ -251,13 +251,8 @@ TEST(String, readFile) {
     unlink(emptyFile.c_str());
   };
 
-  auto f = fopen(emptyFile.c_str(), "wb");
-  EXPECT_NE(nullptr, f);
-  EXPECT_EQ(0, fclose(f));
-  f = fopen(afile.c_str(), "wb");
-  EXPECT_NE(nullptr, f);
-  EXPECT_EQ(3, fwrite("bar", 1, 3, f));
-  EXPECT_EQ(0, fclose(f));
+  EXPECT_TRUE(writeFile(string(), emptyFile.c_str()));
+  EXPECT_TRUE(writeFile(StringPiece("bar"), afile.c_str()));
 
   {
     string contents;
@@ -287,6 +282,6 @@ TEST(String, readFile) {
 
 int main(int argc, char *argv[]) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   return RUN_ALL_TESTS();
 }

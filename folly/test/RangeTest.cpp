@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,31 +17,32 @@
 // @author Kristina Holst (kholst@fb.com)
 // @author Andrei Alexandrescu (andrei.alexandrescu@fb.com)
 
-#include "folly/Range.h"
+#include <folly/Range.h>
 
+#include <sys/mman.h>
 #include <array>
-#include <boost/range/concepts.hpp>
 #include <cstdlib>
-#include <gtest/gtest.h>
 #include <iterator>
 #include <limits>
+#include <random>
 #include <string>
-#include <sys/mman.h>
+#include <type_traits>
 #include <vector>
+#include <boost/range/concepts.hpp>
+#include <gtest/gtest.h>
 
 namespace folly { namespace detail {
 
 // declaration of functions in Range.cpp
-size_t qfind_first_byte_of_memchr(const StringPiece& haystack,
-                                  const StringPiece& needles);
-
-size_t qfind_first_byte_of_byteset(const StringPiece& haystack,
-                                   const StringPiece& needles);
+size_t qfind_first_byte_of_byteset(const StringPiece haystack,
+                                   const StringPiece needles);
 
 }}  // namespaces
 
 using namespace folly;
 using namespace std;
+
+static_assert(std::is_literal_type<StringPiece>::value, "");
 
 BOOST_CONCEPT_ASSERT((boost::RandomAccessRangeConcept<StringPiece>));
 
@@ -439,6 +440,7 @@ TEST(StringPiece, split_step_char_delimiter) {
   folly::StringPiece p(s);
   EXPECT_EQ(s, p.begin());
   EXPECT_EQ(e, p.end());
+  EXPECT_EQ(s, p);
 
   auto x = p.split_step(' ');
   EXPECT_EQ(std::next(s, 5), p.begin());
@@ -496,6 +498,7 @@ TEST(StringPiece, split_step_range_delimiter) {
   folly::StringPiece p(s);
   EXPECT_EQ(s, p.begin());
   EXPECT_EQ(e, p.end());
+  EXPECT_EQ(s, p);
 
   auto x = p.split_step("  ");
   EXPECT_EQ(std::next(s, 6), p.begin());
@@ -560,6 +563,7 @@ TEST(StringPiece, split_step_with_process_char_delimiter) {
   folly::StringPiece p(s);
   EXPECT_EQ(s, p.begin());
   EXPECT_EQ(e, p.end());
+  EXPECT_EQ(s, p);
 
   EXPECT_EQ(1, (p.split_step(' ', [&](folly::StringPiece x) {
     EXPECT_EQ(std::next(s, 5), p.begin());
@@ -642,6 +646,7 @@ TEST(StringPiece, split_step_with_process_range_delimiter) {
   folly::StringPiece p(s);
   EXPECT_EQ(s, p.begin());
   EXPECT_EQ(e, p.end());
+  EXPECT_EQ(s, p);
 
   EXPECT_EQ(1, (p.split_step("  ", [&](folly::StringPiece x) {
     EXPECT_EQ(std::next(s, 6), p.begin());
@@ -721,6 +726,92 @@ TEST(StringPiece, split_step_with_process_range_delimiter) {
   EXPECT_NO_THROW(p.split_step(' ', split_step_with_process_noop));
 }
 
+TEST(StringPiece, split_step_with_process_char_delimiter_additional_args) {
+  //              0         1         2
+  //              012345678901234567890123456
+  auto const s = "this is just  a test string";
+  auto const e = std::next(s, std::strlen(s));
+  auto const delimiter = ' ';
+  EXPECT_EQ('\0', *e);
+
+  folly::StringPiece p(s);
+  EXPECT_EQ(s, p.begin());
+  EXPECT_EQ(e, p.end());
+  EXPECT_EQ(s, p);
+
+  auto const functor = [](
+    folly::StringPiece s,
+    folly::StringPiece expected
+  ) {
+    EXPECT_EQ(expected, s);
+    return expected;
+  };
+
+  auto const checker = [&](folly::StringPiece expected) {
+    EXPECT_EQ(expected, p.split_step(delimiter, functor, expected));
+  };
+
+  checker("this");
+  checker("is");
+  checker("just");
+  checker("");
+  checker("a");
+  checker("test");
+  checker("string");
+  checker("");
+  checker("");
+
+  EXPECT_TRUE(p.empty());
+}
+
+TEST(StringPiece, split_step_with_process_range_delimiter_additional_args) {
+  //              0         1         2         3
+  //              0123456789012345678901234567890123
+  auto const s = "this  is  just    a   test  string";
+  auto const e = std::next(s, std::strlen(s));
+  auto const delimiter = "  ";
+  EXPECT_EQ('\0', *e);
+
+  folly::StringPiece p(s);
+  EXPECT_EQ(s, p.begin());
+  EXPECT_EQ(e, p.end());
+  EXPECT_EQ(s, p);
+
+  auto const functor = [](
+    folly::StringPiece s,
+    folly::StringPiece expected
+  ) {
+    EXPECT_EQ(expected, s);
+    return expected;
+  };
+
+  auto const checker = [&](folly::StringPiece expected) {
+    EXPECT_EQ(expected, p.split_step(delimiter, functor, expected));
+  };
+
+  checker("this");
+  checker("is");
+  checker("just");
+  checker("");
+  checker("a");
+  checker(" test");
+  checker("string");
+  checker("");
+  checker("");
+
+  EXPECT_TRUE(p.empty());
+}
+
+TEST(StringPiece, NoInvalidImplicitConversions) {
+  struct IsString {
+    bool operator()(folly::Range<int*>) { return false; }
+    bool operator()(folly::StringPiece) { return true; }
+  };
+
+  std::string s = "hello";
+  EXPECT_TRUE(IsString()(s));
+}
+
 TEST(qfind, UInt32_Ranges) {
   vector<uint32_t> a({1, 2, 3, 260, 5});
   vector<uint32_t> b({2, 3, 4});
@@ -756,19 +847,14 @@ struct NoSseNeedleFinder {
   }
 };
 
-struct MemchrNeedleFinder {
-  static size_t find_first_byte_of(StringPiece haystack, StringPiece needles) {
-    return detail::qfind_first_byte_of_memchr(haystack, needles);
-  }
-};
-
 struct ByteSetNeedleFinder {
   static size_t find_first_byte_of(StringPiece haystack, StringPiece needles) {
     return detail::qfind_first_byte_of_byteset(haystack, needles);
   }
 };
 
-typedef ::testing::Types<SseNeedleFinder, NoSseNeedleFinder, MemchrNeedleFinder,
+typedef ::testing::Types<SseNeedleFinder,
+                         NoSseNeedleFinder,
                          ByteSetNeedleFinder> NeedleFinders;
 TYPED_TEST_CASE(NeedleFinderTest, NeedleFinders);
 
@@ -811,9 +897,9 @@ TYPED_TEST(NeedleFinderTest, Empty) {
 TYPED_TEST(NeedleFinderTest, Unaligned) {
   // works correctly even if input buffers are not 16-byte aligned
   string s = "0123456789ABCDEFGH";
-  for (int i = 0; i < s.size(); ++i) {
+  for (size_t i = 0; i < s.size(); ++i) {
     StringPiece a(s.c_str() + i);
-    for (int j = 0; j < s.size(); ++j) {
+    for (size_t j = 0; j < s.size(); ++j) {
       StringPiece b(s.c_str() + j);
       EXPECT_EQ((i > j) ? 0 : j - i, this->find_first_byte_of(a, b));
     }
@@ -828,23 +914,23 @@ TYPED_TEST(NeedleFinderTest, Needles256) {
   const auto maxValue = std::numeric_limits<StringPiece::value_type>::max();
   // make the size ~big to avoid any edge-case branches for tiny haystacks
   const int haystackSize = 50;
-  for (int i = minValue; i <= maxValue; i++) {  // <=
+  for (size_t i = minValue; i <= maxValue; i++) {  // <=
     needles.push_back(i);
   }
   EXPECT_EQ(StringPiece::npos, this->find_first_byte_of("", needles));
-  for (int i = minValue; i <= maxValue; i++) {
+  for (size_t i = minValue; i <= maxValue; i++) {
     EXPECT_EQ(0, this->find_first_byte_of(string(haystackSize, i), needles));
   }
 
   needles.append("these are redundant characters");
   EXPECT_EQ(StringPiece::npos, this->find_first_byte_of("", needles));
-  for (int i = minValue; i <= maxValue; i++) {
+  for (size_t i = minValue; i <= maxValue; i++) {
     EXPECT_EQ(0, this->find_first_byte_of(string(haystackSize, i), needles));
   }
 }
 
 TYPED_TEST(NeedleFinderTest, Base) {
-  for (int i = 0; i < 32; ++i) {
+  for (size_t i = 0; i < 32; ++i) {
     for (int j = 0; j < 32; ++j) {
       string s = string(i, 'X') + "abca" + string(i, 'X');
       string delims = string(j, 'Y') + "a" + string(j, 'Y');
@@ -961,4 +1047,137 @@ TEST(RangeFunc, Array) {
 TEST(RangeFunc, CArray) {
   int x[] {1, 2, 3, 4};
   testRangeFunc(x, 4);
+}
+
+std::string get_rand_str(size_t size,
+                         std::uniform_int_distribution<>& dist,
+                         std::mt19937& gen) {
+  std::string ret(size, '\0');
+  for (size_t i = 0; i < size; ++i) {
+    ret[i] = static_cast<char>(dist(gen));
+  }
+
+  return ret;
+}
+
+namespace folly {
+bool operator==(MutableStringPiece mp, StringPiece sp) {
+  return mp.compare(sp) == 0;
+}
+
+bool operator==(StringPiece sp, MutableStringPiece mp) {
+  return mp.compare(sp) == 0;
+}
+}
+
+TEST(ReplaceAt, exhaustiveTest) {
+  char input[] = "this is nice and long input";
+  auto msp = MutableStringPiece(input);
+  auto str = std::string(input);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<> dist('a', 'z');
+
+  for (int i=0; i < 100; ++i) {
+    for (size_t j = 1; j <= msp.size(); ++j) {
+      auto replacement = get_rand_str(j, dist, gen);
+      for (size_t pos = 0; pos < msp.size() - j; ++pos) {
+        msp.replaceAt(pos, replacement);
+        str.replace(pos, replacement.size(), replacement);
+        EXPECT_EQ(msp.compare(str), 0);
+      }
+    }
+  }
+
+  // too far
+  EXPECT_EQ(msp.replaceAt(msp.size() - 2, StringPiece("meh")), false);
+}
+
+TEST(ReplaceAll, basicTest) {
+  char input[] = "this is nice and long input";
+  auto orig = std::string(input);
+  auto msp = MutableStringPiece(input);
+
+  EXPECT_EQ(msp.replaceAll("is", "si"), 2);
+  EXPECT_EQ("thsi si nice and long input", msp);
+  EXPECT_EQ(msp.replaceAll("si", "is"), 2);
+  EXPECT_EQ(msp, orig);
+
+  EXPECT_EQ(msp.replaceAll("abcd", "efgh"), 0); // nothing to replace
+  EXPECT_EQ(msp, orig);
+
+  // at the very beginning
+  EXPECT_EQ(msp.replaceAll("this", "siht"), 1);
+  EXPECT_EQ("siht is nice and long input", msp);
+  EXPECT_EQ(msp.replaceAll("siht", "this"), 1);
+  EXPECT_EQ(msp, orig);
+
+  // at the very end
+  EXPECT_EQ(msp.replaceAll("input", "soput"), 1);
+  EXPECT_EQ("this is nice and long soput", msp);
+  EXPECT_EQ(msp.replaceAll("soput", "input"), 1);
+  EXPECT_EQ(msp, orig);
+
+  // all spaces
+  EXPECT_EQ(msp.replaceAll(" ", "@"), 5);
+  EXPECT_EQ("this@is@nice@and@long@input", msp);
+  EXPECT_EQ(msp.replaceAll("@", " "), 5);
+  EXPECT_EQ(msp, orig);
+}
+
+TEST(ReplaceAll, randomTest) {
+  char input[] = "abcdefghijklmnoprstuwqz"; // no pattern repeata inside
+  auto orig = std::string(input);
+  auto msp = MutableStringPiece(input);
+
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<> dist('A', 'Z');
+
+  for (int i=0; i < 100; ++i) {
+    for (size_t j = 1; j <= orig.size(); ++j) {
+      auto replacement = get_rand_str(j, dist, gen);
+      for (size_t pos = 0; pos < msp.size() - j; ++pos) {
+        auto piece = orig.substr(pos, j);
+        EXPECT_EQ(msp.replaceAll(piece, replacement), 1);
+        EXPECT_EQ(msp.find(replacement), pos);
+        EXPECT_EQ(msp.replaceAll(replacement, piece), 1);
+        EXPECT_EQ(msp, orig);
+      }
+    }
+  }
+}
+
+TEST(ReplaceAll, BadArg) {
+  int count = 0;
+  auto fst = "longer";
+  auto snd = "small";
+  char input[] = "meh meh meh";
+  auto all =  MutableStringPiece(input);
+
+  try {
+    all.replaceAll(fst, snd);
+  } catch (std::invalid_argument&) {
+    ++count;
+  }
+
+  try {
+    all.replaceAll(snd, fst);
+  } catch (std::invalid_argument&) {
+    ++count;
+  }
+
+  EXPECT_EQ(count, 2);
+}
+
+TEST(Range, Constructors) {
+  vector<int> c = {1, 2, 3};
+  typedef Range<vector<int>::iterator> RangeType;
+  typedef Range<vector<int>::const_iterator> ConstRangeType;
+  RangeType cr(c.begin(), c.end());
+  auto subpiece1 = ConstRangeType(cr, 1, 5);
+  auto subpiece2 = ConstRangeType(cr, 1);
+  EXPECT_EQ(subpiece1.size(), 2);
+  EXPECT_EQ(subpiece1.begin(), subpiece2.begin());
+  EXPECT_EQ(subpiece1.end(), subpiece2.end());
 }

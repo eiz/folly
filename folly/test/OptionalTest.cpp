@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/Optional.h"
+#include <folly/Optional.h>
 
 #include <memory>
 #include <vector>
@@ -97,13 +97,101 @@ TEST(Optional, Const) {
 TEST(Optional, Simple) {
   Optional<int> opt;
   EXPECT_FALSE(bool(opt));
+  EXPECT_EQ(42, opt.value_or(42));
   opt = 4;
   EXPECT_TRUE(bool(opt));
   EXPECT_EQ(4, *opt);
+  EXPECT_EQ(4, opt.value_or(42));
   opt = 5;
   EXPECT_EQ(5, *opt);
   opt.clear();
   EXPECT_FALSE(bool(opt));
+}
+
+class MoveTester {
+public:
+  /* implicit */ MoveTester(const char* s) : s_(s) {}
+  MoveTester(const MoveTester&) = default;
+  MoveTester(MoveTester&& other) noexcept {
+    s_ = std::move(other.s_);
+    other.s_ = "";
+  }
+  MoveTester& operator=(const MoveTester&) = default;
+  MoveTester& operator=(MoveTester&&) = default;
+private:
+  friend bool operator==(const MoveTester& o1, const MoveTester& o2);
+  std::string s_;
+};
+
+bool operator==(const MoveTester& o1, const MoveTester& o2) {
+  return o1.s_ == o2.s_;
+}
+
+TEST(Optional, value_or_rvalue_arg) {
+  Optional<MoveTester> opt;
+  MoveTester dflt = "hello";
+  EXPECT_EQ("hello", opt.value_or(dflt));
+  EXPECT_EQ("hello", dflt);
+  EXPECT_EQ("hello", opt.value_or(std::move(dflt)));
+  EXPECT_EQ("", dflt);
+  EXPECT_EQ("world", opt.value_or("world"));
+
+  dflt = "hello";
+  // Make sure that the const overload works on const objects
+  const auto& optc = opt;
+  EXPECT_EQ("hello", optc.value_or(dflt));
+  EXPECT_EQ("hello", dflt);
+  EXPECT_EQ("hello", optc.value_or(std::move(dflt)));
+  EXPECT_EQ("", dflt);
+  EXPECT_EQ("world", optc.value_or("world"));
+
+  dflt = "hello";
+  opt = "meow";
+  EXPECT_EQ("meow", opt.value_or(dflt));
+  EXPECT_EQ("hello", dflt);
+  EXPECT_EQ("meow", opt.value_or(std::move(dflt)));
+  EXPECT_EQ("hello", dflt);  // only moved if used
+}
+
+TEST(Optional, value_or_noncopyable) {
+  Optional<std::unique_ptr<int>> opt;
+  std::unique_ptr<int> dflt(new int(42));
+  EXPECT_EQ(42, *std::move(opt).value_or(std::move(dflt)));
+}
+
+struct ExpectingDeleter {
+  explicit ExpectingDeleter(int expected) : expected(expected) { }
+  int expected;
+  void operator()(const int* ptr) {
+    EXPECT_EQ(*ptr, expected);
+    delete ptr;
+  }
+};
+
+TEST(Optional, value_life_extention) {
+  // Extends the life of the value.
+  const auto& ptr = Optional<std::unique_ptr<int, ExpectingDeleter>>(
+      {new int(42), ExpectingDeleter{1337}}).value();
+  *ptr = 1337;
+}
+
+TEST(Optional, value_move) {
+  auto ptr = Optional<std::unique_ptr<int, ExpectingDeleter>>(
+      {new int(42), ExpectingDeleter{1337}}).value();
+  *ptr = 1337;
+}
+
+TEST(Optional, dereference_life_extention) {
+  // Extends the life of the value.
+  const auto& ptr = *Optional<std::unique_ptr<int, ExpectingDeleter>>(
+      {new int(42), ExpectingDeleter{1337}});
+  *ptr = 1337;
+}
+
+TEST(Optional, dereference_move) {
+  auto ptr = *Optional<std::unique_ptr<int, ExpectingDeleter>>(
+      {new int(42), ExpectingDeleter{1337}});
+  *ptr = 1337;
 }
 
 TEST(Optional, EmptyConstruct) {
@@ -229,16 +317,16 @@ TEST(Optional, Comparisons) {
   Optional<int> o1(1);
   Optional<int> o2(2);
 
-  EXPECT_TRUE(o_ <= o_);
-  EXPECT_TRUE(o_ == o_);
-  EXPECT_TRUE(o_ >= o_);
+  EXPECT_TRUE(o_ <= (o_));
+  EXPECT_TRUE(o_ == (o_));
+  EXPECT_TRUE(o_ >= (o_));
 
   EXPECT_TRUE(o1 < o2);
   EXPECT_TRUE(o1 <= o2);
-  EXPECT_TRUE(o1 <= o1);
-  EXPECT_TRUE(o1 == o1);
+  EXPECT_TRUE(o1 <= (o1));
+  EXPECT_TRUE(o1 == (o1));
   EXPECT_TRUE(o1 != o2);
-  EXPECT_TRUE(o1 >= o1);
+  EXPECT_TRUE(o1 >= (o1));
   EXPECT_TRUE(o2 >= o1);
   EXPECT_TRUE(o2 > o1);
 
@@ -246,7 +334,7 @@ TEST(Optional, Comparisons) {
   EXPECT_FALSE(o2 <= o1);
   EXPECT_FALSE(o2 <= o1);
   EXPECT_FALSE(o2 == o1);
-  EXPECT_FALSE(o1 != o1);
+  EXPECT_FALSE(o1 != (o1));
   EXPECT_FALSE(o1 >= o2);
   EXPECT_FALSE(o1 >= o2);
   EXPECT_FALSE(o1 > o2);
@@ -288,7 +376,7 @@ TEST(Optional, Comparisons) {
   EXPECT_TRUE(6 >  boi);
 
   boost::optional<bool> bob(false);
-  EXPECT_TRUE(bob);
+  EXPECT_TRUE((bool)bob);
   EXPECT_TRUE(bob == false); // well that was confusing
   EXPECT_FALSE(bob != false);
 }
@@ -379,6 +467,27 @@ TEST(Optional, MakeOptional) {
   EXPECT_EQ(**optIntPtr, 3);
 }
 
+#ifdef __clang__
+# pragma clang diagnostic push
+# if __clang_major__ > 3 || __clang_minor__ >= 6
+#  pragma clang diagnostic ignored "-Wself-move"
+# endif
+#endif
+
+TEST(Optional, SelfAssignment) {
+  Optional<int> a = 42;
+  a = a;
+  ASSERT_TRUE(a.hasValue() && a.value() == 42);
+
+  Optional<int> b = 23333333;
+  b = std::move(b);
+  ASSERT_TRUE(b.hasValue() && b.value() == 23333333);
+}
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+
 class ContainsOptional {
  public:
   ContainsOptional() { }
@@ -421,6 +530,11 @@ TEST(Optional, AssignmentContained) {
     target = opt_uninit;
     EXPECT_FALSE(target.hasValue());
   }
+}
+
+TEST(Optional, Exceptions) {
+  Optional<int> empty;
+  EXPECT_THROW(empty.value(), OptionalEmptyException);
 }
 
 }

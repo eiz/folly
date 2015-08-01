@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,19 +20,23 @@
 #include <ctime>
 #include <cstdint>
 
-#ifndef FOLLY_NO_CONFIG
-#include "folly/folly-config.h"
-#endif
+#include <folly/Portability.h>
 
 #if FOLLY_HAVE_CLOCK_GETTIME
 #error This should only be used as a workaround for platforms \
           that do not support clock_gettime(2).
 #endif
 
+/* For windows, we'll use pthread's time implementations */
+#ifdef _MSC_VER
+#include <pthread.h>
+#include <pthread_time.h>
+#else
 typedef uint8_t clockid_t;
 #define CLOCK_REALTIME 0
 
 int clock_gettime(clockid_t clk_id, struct timespec* ts);
 int clock_getres(clockid_t clk_id, struct timespec* ts);
+#endif
 
 #endif /* FOLLY_DETAIL_CLOCK_H_ */

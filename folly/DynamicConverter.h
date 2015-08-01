@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 #ifndef DYNAMIC_CONVERTER_H
 #define DYNAMIC_CONVERTER_H
 
-#include "folly/dynamic.h"
+#include <folly/dynamic.h>
 namespace folly {
   template <typename T> T convertTo(const dynamic&);
   template <typename T> dynamic toDynamic(const T&);
@@ -41,7 +41,7 @@ namespace folly {
 #include <iterator>
 #include <boost/iterator/iterator_adaptor.hpp>
 #include <boost/mpl/has_xxx.hpp>
-#include "folly/Likely.h"
+#include <folly/Likely.h>
 
 namespace folly {
 
@@ -54,12 +54,19 @@ BOOST_MPL_HAS_XXX_TRAIT_DEF(value_type);
 BOOST_MPL_HAS_XXX_TRAIT_DEF(iterator);
 BOOST_MPL_HAS_XXX_TRAIT_DEF(mapped_type);
 
-template <typename T> struct class_is_container {
-  typedef std::reverse_iterator<T*> some_iterator;
+template <typename T> struct iterator_class_is_container {
+  typedef std::reverse_iterator<typename T::iterator> some_iterator;
   enum { value = has_value_type<T>::value &&
-                 has_iterator<T>::value &&
               std::is_constructible<T, some_iterator, some_iterator>::value };
 };
+
+template <typename T>
+using class_is_container = typename
+  std::conditional<
+    has_iterator<T>::value,
+    iterator_class_is_container<T>,
+    std::false_type
+  >::type;
 
 template <typename T> struct class_is_range {
   enum { value = has_value_type<T>::value &&
@@ -168,7 +175,7 @@ public:
 
 // conversion factory
 template <typename T, typename It>
-static inline std::move_iterator<Transformer<T, It>>
+inline std::move_iterator<Transformer<T, It>>
 conversionIterator(const It& it) {
   return std::make_move_iterator(Transformer<T, It>(it));
 }
@@ -337,4 +344,3 @@ dynamic toDynamic(const T& x) {
 } // namespace folly
 
 #endif // DYNAMIC_CONVERTER_H
-

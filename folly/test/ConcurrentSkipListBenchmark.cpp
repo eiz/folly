@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,10 @@
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
-#include "folly/Benchmark.h"
-#include "folly/ConcurrentSkipList.h"
-#include "folly/Hash.h"
-#include "folly/RWSpinLock.h"
+#include <folly/Benchmark.h>
+#include <folly/ConcurrentSkipList.h>
+#include <folly/Hash.h>
+#include <folly/RWSpinLock.h>
 
 
 DEFINE_int32(num_threads, 12, "num concurrent threads to test");
@@ -302,7 +302,7 @@ BENCHMARK(Accessor, iters) {
   auto sl = skiplist.get();
 
   susp.dismiss();
-  for (int i = 0; i < iters; ++i) {
+  for (size_t i = 0; i < iters; ++i) {
     SkipListAccessor accessor(sl);
   }
 }
@@ -318,7 +318,7 @@ BENCHMARK(accessorBasicRefcounting, iters) {
   l.init();
 
   susp.dismiss();
-  for (int i = 0; i < iters; ++i) {
+  for (size_t i = 0; i < iters; ++i) {
     value->fetch_add(1, std::memory_order_relaxed);
     if (dirty->load(std::memory_order_acquire) != 0) {
       folly::MSLGuard g(l);
@@ -407,23 +407,23 @@ class ConcurrentAccessData {
     sets_[idx].erase(val);
   }
 
-  void runSkipList(int id, int iters) {
+  void runSkipList(int id, size_t iters) {
     int sum = 0;
-    for (int i = 0; i < iters; ++i) {
+    for (size_t i = 0; i < iters; ++i) {
       sum += accessSkipList(id, i);
     }
     // VLOG(20) << sum;
   }
 
-  void runSet(int id, int iters) {
+  void runSet(size_t id, size_t iters) {
     int sum = 0;
-    for (int i = 0; i < iters; ++i) {
+    for (size_t i = 0; i < iters; ++i) {
       sum += accessSet(id, i);
     }
     // VLOG(20) << sum;
   }
 
-  bool accessSkipList(int64_t id, int t) {
+  bool accessSkipList(int64_t id, size_t t) {
     if (t > readValues_.size()) {
       t = t % readValues_.size();
     }
@@ -441,7 +441,7 @@ class ConcurrentAccessData {
     }
   }
 
-  bool accessSet(int64_t id, int t) {
+  bool accessSet(int64_t id, size_t t) {
     if (t > readValues_.size()) {
       t = t % readValues_.size();
     }
@@ -599,7 +599,7 @@ BENCHMARK_DRAW_LINE();
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   initData();
   runBenchmarks();

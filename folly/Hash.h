@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,9 @@
 #include <utility>
 #include <tuple>
 
-#include "folly/SpookyHashV1.h"
-#include "folly/SpookyHashV2.h"
+#include <folly/ApplyTuple.h>
+#include <folly/SpookyHashV1.h>
+#include <folly/SpookyHashV2.h>
 
 /*
  * Various hashing functions.
@@ -42,12 +43,12 @@ namespace folly { namespace hash {
 // This is the Hash128to64 function from Google's cityhash (available
 // under the MIT License).  We use it to reduce multiple 64 bit hashes
 // into a single hash.
-inline size_t hash_128_to_64(const size_t upper, const size_t lower) {
+inline uint64_t hash_128_to_64(const uint64_t upper, const uint64_t lower) {
   // Murmur-inspired hashing.
-  const size_t kMul = 0x9ddfea08eb382d69ULL;
-  size_t a = (lower ^ upper) * kMul;
+  const uint64_t kMul = 0x9ddfea08eb382d69ULL;
+  uint64_t a = (lower ^ upper) * kMul;
   a ^= (a >> 47);
-  size_t b = (upper ^ a) * kMul;
+  uint64_t b = (upper ^ a) * kMul;
   b ^= (b >> 47);
   b *= kMul;
   return b;
@@ -57,6 +58,19 @@ inline size_t hash_128_to_64(const size_t upper, const size_t lower) {
 template <class Hasher>
 inline size_t hash_combine_generic() {
   return 0;
+}
+
+template <
+    class Iter,
+    class Hash = std::hash<typename std::iterator_traits<Iter>::value_type>>
+uint64_t hash_range(Iter begin,
+                    Iter end,
+                    uint64_t hash = 0,
+                    Hash hasher = Hash()) {
+  for (; begin != end; ++begin) {
+    hash = hash_128_to_64(hash, hasher(*begin));
+  }
+  return hash;
 }
 
 template <class Hasher, typename T, typename... Ts>
@@ -204,11 +218,11 @@ inline uint32_t fnv32(const char* s,
 }
 
 inline uint32_t fnv32_buf(const void* buf,
-                          int n,
+                          size_t n,
                           uint32_t hash = FNV_32_HASH_START) {
   const char* char_buf = reinterpret_cast<const char*>(buf);
 
-  for (int i = 0; i < n; ++i) {
+  for (size_t i = 0; i < n; ++i) {
     hash += (hash << 1) + (hash << 4) + (hash << 7) +
             (hash << 8) + (hash << 24);
     hash ^= char_buf[i];
@@ -233,11 +247,11 @@ inline uint64_t fnv64(const char* s,
 }
 
 inline uint64_t fnv64_buf(const void* buf,
-                          int n,
+                          size_t n,
                           uint64_t hash = FNV_64_HASH_START) {
   const char* char_buf = reinterpret_cast<const char*>(buf);
 
-  for (int i = 0; i < n; ++i) {
+  for (size_t i = 0; i < n; ++i) {
     hash += (hash << 1) + (hash << 4) + (hash << 5) + (hash << 7) +
       (hash << 8) + (hash << 40);
     hash ^= char_buf[i];
@@ -256,11 +270,11 @@ inline uint64_t fnv64(const std::string& str,
 
 #define get16bits(d) (*((const uint16_t*) (d)))
 
-inline uint32_t hsieh_hash32_buf(const void* buf, int len) {
+inline uint32_t hsieh_hash32_buf(const void* buf, size_t len) {
   const char* s = reinterpret_cast<const char*>(buf);
-  uint32_t hash = len;
+  uint32_t hash = static_cast<uint32_t>(len);
   uint32_t tmp;
-  int rem;
+  size_t rem;
 
   if (len <= 0 || buf == 0) {
     return 0;
@@ -322,8 +336,20 @@ inline uint32_t hsieh_hash32_str(const std::string& str) {
 
 } // namespace hash
 
-template<class Key>
+template<class Key, class Enable = void>
 struct hasher;
+
+struct Hash {
+  template <class T>
+  size_t operator()(const T& v) const {
+    return hasher<T>()(v);
+  }
+
+  template <class T, class... Ts>
+  size_t operator()(const T& t, const Ts&... ts) const {
+    return hash::hash_128_to_64((*this)(t), (*this)(ts...));
+  }
+};
 
 template<> struct hasher<int32_t> {
   size_t operator()(int32_t key) const {
@@ -346,6 +372,27 @@ template<> struct hasher<int64_t> {
 template<> struct hasher<uint64_t> {
   size_t operator()(uint64_t key) const {
     return hash::twang_mix64(key);
+  }
+};
+
+template <class T>
+struct hasher<T, typename std::enable_if<std::is_enum<T>::value, void>::type> {
+  size_t operator()(T key) const {
+    return Hash()(static_cast<typename std::underlying_type<T>::type>(key));
+  }
+};
+
+template <class T1, class T2>
+struct hasher<std::pair<T1, T2>> {
+  size_t operator()(const std::pair<T1, T2>& key) const {
+    return Hash()(key.first, key.second);
+  }
+};
+
+template <typename... Ts>
+struct hasher<std::tuple<Ts...>> {
+  size_t operator() (const std::tuple<Ts...>& key) const {
+    return applyTuple(Hash(), key);
   }
 };
 
@@ -376,7 +423,7 @@ namespace std {
   // Hash function for pairs. Requires default hash functions for both
   // items in the pair.
   template <typename T1, typename T2>
-  class hash<std::pair<T1, T2> > {
+  struct hash<std::pair<T1, T2> > {
   public:
     size_t operator()(const std::pair<T1, T2>& x) const {
       return folly::hash::hash_combine(x.first, x.second);

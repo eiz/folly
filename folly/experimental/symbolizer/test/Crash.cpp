@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-#include "folly/experimental/symbolizer/SignalHandler.h"
+#include <folly/experimental/symbolizer/SignalHandler.h>
 
 int main() {
   folly::symbolizer::installFatalSignalHandler();
-  *(int*) nullptr = 1;
+  __builtin_trap();
   return 0;
 }

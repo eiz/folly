@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
-#include "folly/experimental/io/FsUtil.h"
+#include <folly/experimental/io/FsUtil.h>
+
+#include <unistd.h>
+#include <folly/Exception.h>
 
 namespace bsys = ::boost::system;
 
@@ -66,6 +69,9 @@ path canonical_parent(const path& pth, const path& base) {
   return canonical(pth.parent_path(), base) / pth.filename();
 }
 
+path executable_path() {
+  return read_symlink("/proc/self/exe");
+}
+
 }  // namespace fs
 }  // namespace folly
-

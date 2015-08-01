@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@
 #ifndef FOLLY_SAFEASSERT_H_
 #define FOLLY_SAFEASSERT_H_
 
-#include "folly/Portability.h"
-#include "folly/Preprocessor.h"
+#include <folly/Portability.h>
+#include <folly/Preprocessor.h>
 
 /**
  * Verify that the expression is true. If not, prints an error message
@@ -50,4 +50,3 @@ FOLLY_NORETURN void assertionFailure(const char* expr, const char* msg,
 }}  // namespace folly
 
 #endif /* FOLLY_SAFEASSERT_H_ */
-

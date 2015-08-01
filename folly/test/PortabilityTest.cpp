@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/Portability.h"
+#include <folly/Portability.h>
 
 #include <memory>
 
@@ -28,7 +28,7 @@ class Base {
 
 class Derived : public Base {
  public:
-  virtual int foo() const FOLLY_FINAL { return 2; }
+  int foo() const FOLLY_FINAL { return 2; }
 };
 
 // A compiler that supports final will likely inline the call to p->foo()
@@ -42,4 +42,3 @@ TEST(Portability, Final) {
   EXPECT_EQ(3, fooBase(p.get()));
   EXPECT_EQ(3, fooDerived(p.get()));
 }
-

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,15 +25,15 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <iosfwd>
 #include <mutex>
-#include <ostream>
 #include <utility>
 #include <vector>
 
 #include <boost/noncopyable.hpp>
 
-#include "folly/Portability.h"
-#include "folly/Range.h"
+#include <folly/Portability.h>
+#include <folly/Range.h>
 
 namespace folly {
 
@@ -169,6 +169,12 @@ class AsyncIO : private boost::noncopyable {
   size_t capacity() const { return capacity_; }
 
   /**
+   * Return the accumulative number of submitted I/O, since this object
+   * has been created.
+   */
+  size_t totalSubmits() const { return submitted_; }
+
+  /**
    * If POLLABLE, return a file descriptor that can be passed to poll / epoll
    * and will become readable when any async IO operations have completed.
    * If NOT_POLLABLE, return -1.
@@ -197,8 +203,9 @@ class AsyncIO : private boost::noncopyable {
   std::atomic<bool> ctxSet_;
   std::mutex initMutex_;
 
-  std::atomic<ssize_t> pending_;
-  const ssize_t capacity_;
+  std::atomic<size_t> pending_;
+  std::atomic<size_t> submitted_;
+  const size_t capacity_;
   int pollFd_;
   std::vector<Op*> completed_;
 };
@@ -233,6 +240,7 @@ class AsyncIOQueue {
    */
   typedef std::function<AsyncIOOp*()> OpFactory;
   void submit(OpFactory op);
+
  private:
   void onCompleted(AsyncIOOp* op);
   void maybeDequeue();
@@ -245,4 +253,3 @@ class AsyncIOQueue {
 }  // namespace folly
 
 #endif /* FOLLY_IO_ASYNCIO_H_ */
-

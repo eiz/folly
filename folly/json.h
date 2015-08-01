@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,9 +41,9 @@
 #ifndef FOLLY_JSON_H_
 #define FOLLY_JSON_H_
 
-#include "folly/dynamic.h"
-#include "folly/FBString.h"
-#include "folly/Range.h"
+#include <folly/dynamic.h>
+#include <folly/FBString.h>
+#include <folly/Range.h>
 
 namespace folly {
 
@@ -121,6 +121,11 @@ namespace json {
   void escapeString(StringPiece input,
                     fbstring& out,
                     const serialization_opts& opts);
+
+  /*
+   * Strip all C99-like comments (i.e. // and / * ... * /)
+   */
+  fbstring stripComments(StringPiece jsonC);
 }
 
 //////////////////////////////////////////////////////////////////////

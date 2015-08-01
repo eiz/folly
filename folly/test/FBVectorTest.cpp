@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@
 //
 // Author: andrei.alexandrescu@fb.com
 
-#include "folly/Traits.h"
-#include "folly/Random.h"
-#include "folly/FBString.h"
-#include "folly/FBVector.h"
+#include <folly/Traits.h>
+#include <folly/Random.h>
+#include <folly/FBString.h>
+#include <folly/FBVector.h>
 
 #include <gflags/gflags.h>
 
@@ -276,6 +276,6 @@ TEST(FBVector, vector_of_maps) {
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   return RUN_ALL_TESTS();
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,9 @@
 #ifndef FOLLY_GEN_CORE_H
 #error This file may only be included from folly/gen/Core.h
 #endif
+
+#include <type_traits>
+#include <utility>
 
 // Ignore shadowing warnings within this file, so includers can use -Wshadow.
 #pragma GCC diagnostic push
@@ -44,7 +47,7 @@ class IsCompatibleSignature<Candidate, ExpectedReturn(ArgTypes...)> {
            class ActualReturn =
              decltype(std::declval<F>()(std::declval<ArgTypes>()...)),
            bool good = std::is_same<ExpectedReturn, ActualReturn>::value>
-  static constexpr bool testArgs(int* p) {
+  static constexpr bool testArgs(int*) {
     return good;
   }
 
@@ -90,9 +93,9 @@ class Operator : public FBounded<Self> {
 
  protected:
   Operator() = default;
-  Operator(Operator&&) = default;
+  Operator(Operator&&) noexcept = default;
   Operator(const Operator&) = default;
-  Operator& operator=(Operator&&) = default;
+  Operator& operator=(Operator&&) noexcept = default;
   Operator& operator=(const Operator&) = default;
 };
 
@@ -178,6 +181,13 @@ class GenImpl : public FBounded<Self> {
   // Child classes should override if the sequence generated is *definitely*
   // infinite. 'infinite' may be false_type for some infinite sequences
   // (due the the Halting Problem).
+  //
+  // In general, almost all sources are finite (only seq(n) produces an infinite
+  // source), almost all operators keep the finiteness of the source (only cycle
+  // makes an infinite generator from a finite one, only until and take make a
+  // finite generator from an infinite one, and concat needs both the inner and
+  // outer generators to be finite to make a finite one), and most sinks
+  // cannot accept and infinite generators (first being the expection).
   static constexpr bool infinite = false;
 };
 
@@ -301,7 +311,7 @@ class Composed : public Operator<Composed<First, Second>> {
   First first_;
   Second second_;
  public:
-  Composed() {}
+  Composed() = default;
 
   Composed(First first, Second second)
     : first_(std::move(first))

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
-#include "folly/detail/CacheLocality.h"
+#include <folly/detail/CacheLocality.h>
 
 #define _GNU_SOURCE 1 // for RTLD_NOLOAD
 #include <dlfcn.h>
 #include <fstream>
 
-#include "folly/Conv.h"
-#include "folly/Exception.h"
-#include "folly/FileUtil.h"
-#include "folly/Format.h"
-#include "folly/ScopeGuard.h"
+#include <folly/Conv.h>
+#include <folly/Exception.h>
+#include <folly/FileUtil.h>
+#include <folly/Format.h>
+#include <folly/ScopeGuard.h>
 
 namespace folly { namespace detail {
 
@@ -32,11 +32,13 @@ namespace folly { namespace detail {
 
 /// Returns the best real CacheLocality information available
 static CacheLocality getSystemLocalityInfo() {
+#ifdef __linux__
   try {
     return CacheLocality::readFromSysfs();
   } catch (...) {
     // keep trying
   }
+#endif
 
   long numCpus = sysconf(_SC_NPROCESSORS_CONF);
   if (numCpus <= 0) {
@@ -78,11 +80,11 @@ const CacheLocality& CacheLocality::system<std::atomic>() {
 /// Returns the first decimal number in the string, or throws an exception
 /// if the string does not start with a number terminated by ',', '-',
 /// '\n', or eos.
-static ssize_t parseLeadingNumber(const std::string& line) {
+static size_t parseLeadingNumber(const std::string& line) {
   auto raw = line.c_str();
   char *end;
-  unsigned val = strtoul(raw, &end, 10);
-  if (end == raw || (*end != ',' && *end != '-' && *end != '\n')) {
+  unsigned long val = strtoul(raw, &end, 10);
+  if (end == raw || (*end != ',' && *end != '-' && *end != '\n' && *end != 0)) {
     throw std::runtime_error(to<std::string>(
         "error parsing list '", line, "'").c_str());
   }
@@ -163,7 +165,7 @@ CacheLocality CacheLocality::readFromSysfsTree(
   // to each other than entries that are far away.  For striping we want
   // the inverse map, since we are starting with the cpu
   std::vector<size_t> indexes(cpus.size());
-  for (int i = 0; i < cpus.size(); ++i) {
+  for (size_t i = 0; i < cpus.size(); ++i) {
     indexes[cpus[i]] = i;
   }
 

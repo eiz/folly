@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,15 +14,17 @@
  * limitations under the License.
  */
 
-#include "folly/experimental/EventCount.h"
+#include <folly/experimental/EventCount.h>
 
 #include <algorithm>
+#include <atomic>
 #include <random>
+#include <thread>
+#include <vector>
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include "folly/Random.h"
-#include "folly/Benchmark.h"
+#include <folly/Random.h>
 
 using namespace folly;
 
@@ -47,15 +49,12 @@ class Semaphore {
 
  private:
   bool tryDown() {
-    for (;;) {
-      int v = value_;
-      if (v == 0) {
-        return false;
-      }
+    for (int v = value_; v != 0;) {
       if (value_.compare_exchange_weak(v, v-1)) {
         return true;
       }
     }
+    return false;
   }
 
   std::atomic<int> value_;
@@ -69,7 +68,7 @@ void randomPartition(Random& random, T key, int n,
     int m = std::min(n, 1000);
     std::uniform_int_distribution<uint32_t> u(1, m);
     int cut = u(random);
-    out.push_back(std::make_pair(key, cut));
+    out.emplace_back(key, cut);
     n -= cut;
   }
 }
@@ -124,14 +123,3 @@ TEST(EventCount, Simple) {
 
   EXPECT_EQ(0, sem.value());
 }
-
-int main(int argc, char *argv[]) {
-  testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
-  auto ret = RUN_ALL_TESTS();
-  if (!ret) {
-    folly::runBenchmarksOnFlag();
-  }
-  return ret;
-}
-

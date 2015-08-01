@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#include "folly/experimental/symbolizer/LineReader.h"
+#include <folly/experimental/symbolizer/LineReader.h>
 
 #include <cstring>
 
-#include "folly/FileUtil.h"
+#include <folly/FileUtil.h>
 
 namespace folly { namespace symbolizer {
 
@@ -71,4 +71,3 @@ LineReader::State LineReader::readLine(StringPiece& line) {
 }
 
 }}  // namespaces
-

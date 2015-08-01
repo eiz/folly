@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,13 +51,24 @@ struct DerefSize
   : std::tuple_size<typename std::remove_reference<Tuple>::type>
 {};
 
+template<class Tuple, class ...Unpacked> struct ExprDoUnpack {
+  enum {
+    value = sizeof...(Unpacked) < DerefSize<Tuple>::value
+  };
+};
+
+template<class Tuple, class ...Unpacked> struct ExprIsUnpacked {
+  enum {
+    value = sizeof...(Unpacked) == DerefSize<Tuple>::value
+  };
+};
+
 // CallTuple recursively unpacks tuple arguments so we can forward
 // them into the function.
 template<class Ret>
 struct CallTuple {
   template<class F, class Tuple, class ...Unpacked>
-  static typename std::enable_if<
-    (sizeof...(Unpacked) < DerefSize<Tuple>::value),
+  static typename std::enable_if<ExprDoUnpack<Tuple, Unpacked...>::value,
     Ret
   >::type call(const F& f, Tuple&& t, Unpacked&&... unp) {
     typedef typename std::tuple_element<
@@ -71,8 +82,7 @@ struct CallTuple {
   }
 
   template<class F, class Tuple, class ...Unpacked>
-  static typename std::enable_if<
-    (sizeof...(Unpacked) == DerefSize<Tuple>::value),
+  static typename std::enable_if<ExprIsUnpacked<Tuple, Unpacked...>::value,
     Ret
   >::type call(const F& f, Tuple&& t, Unpacked&&... unp) {
     return makeCallable(f)(std::forward<Unpacked>(unp)...);
@@ -81,7 +91,7 @@ struct CallTuple {
 
 // The point of this meta function is to extract the contents of the
 // tuple as a parameter pack so we can pass it into std::result_of<>.
-template<class F, class Args> struct ReturnValue {};
+template<class F, class Args> struct ReturnValue;
 template<class F, class ...Args>
 struct ReturnValue<F,std::tuple<Args...>> {
   typedef typename std::result_of<F (Args...)>::type type;
@@ -94,12 +104,12 @@ struct ReturnValue<F,std::tuple<Args...>> {
 template<class Callable, class Tuple>
 typename detail::ReturnValue<
   typename std::decay<Callable>::type,
-  typename std::remove_reference<Tuple>::type
+  typename std::decay<Tuple>::type
 >::type
 applyTuple(const Callable& c, Tuple&& t) {
   typedef typename detail::ReturnValue<
     typename std::decay<Callable>::type,
-    typename std::remove_reference<Tuple>::type
+    typename std::decay<Tuple>::type
   >::type RetT;
   return detail::CallTuple<RetT>::call(c, std::forward<Tuple>(t));
 }

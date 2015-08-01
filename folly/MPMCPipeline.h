@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 
 #include <glog/logging.h>
 
-#include "folly/detail/MPMCPipelineDetail.h"
+#include <folly/detail/MPMCPipelineDetail.h>
 
 namespace folly {
 
@@ -176,7 +176,7 @@ template <class In, class... Stages> class MPMCPipeline {
    * Default-construct pipeline. Useful to move-assign later,
    * just like MPMCQueue, see MPMCQueue.h for more details.
    */
-  MPMCPipeline() { }
+  MPMCPipeline() = default;
 
   /**
    * Construct a pipeline with N+1 queue sizes.
@@ -282,4 +282,3 @@ template <class In, class... Stages> class MPMCPipeline {
 
 
 }  // namespaces
-

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
-#include "folly/ThreadCachedInt.h"
-#include "folly/Hash.h"
+#include <folly/ThreadCachedInt.h>
+#include <folly/Hash.h>
 
 #include <atomic>
 #include <thread>
 #include <gtest/gtest.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
-#include "folly/Benchmark.h"
+#include <folly/Benchmark.h>
 
 using namespace folly;
 
@@ -239,9 +239,9 @@ BENCHMARK_DRAW_LINE();
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
-  google::SetCommandLineOptionWithMode(
-    "bm_min_usec", "10000", google::SET_FLAG_IF_DEFAULT
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::SetCommandLineOptionWithMode(
+    "bm_min_usec", "10000", gflags::SET_FLAG_IF_DEFAULT
   );
   if (FLAGS_benchmark) {
     folly::runBenchmarks();

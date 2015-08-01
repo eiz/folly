@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-#include "folly/Demangle.h"
+#include <folly/Demangle.h>
 
 #include <algorithm>
 #include <string.h>
 
-#include "folly/Malloc.h"
+#include <folly/Malloc.h>
 
 #if FOLLY_HAVE_CPLUS_DEMANGLE_V3_CALLBACK
 # include <cxxabi.h>
@@ -28,7 +28,7 @@
 //
 // TODO(tudorb): Detect this with autoconf for the open-source version.
 //
-// __attribute__((weak)) doesn't work, because cplus_demangle_v3_callback
+// __attribute__((__weak__)) doesn't work, because cplus_demangle_v3_callback
 // is exported by an object file in libiberty.a, and the ELF spec says
 // "The link editor does not extract archive members to resolve undefined weak
 // symbols" (but, interestingly enough, will resolve undefined weak symbols

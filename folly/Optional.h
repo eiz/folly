@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,14 +54,14 @@
  *    cout << *v << endl;
  *  }
  */
-#include <utility>
-#include <cassert>
 #include <cstddef>
+#include <stdexcept>
 #include <type_traits>
+#include <utility>
 
 #include <boost/operators.hpp>
 
-#include "folly/Portability.h"
+#include <folly/Portability.h>
 
 namespace folly {
 
@@ -82,11 +82,19 @@ const None none = nullptr;
 # pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif // __GNUC__
 
+class OptionalEmptyException : public std::runtime_error {
+ public:
+  OptionalEmptyException()
+      : std::runtime_error("Empty Optional cannot be unwrapped") {}
+};
+
 template<class Value>
 class Optional {
  public:
   static_assert(!std::is_reference<Value>::value,
                 "Optional may not be used with reference types");
+  static_assert(!std::is_abstract<Value>::value,
+                "Optional may not be used with abstract types");
 
   Optional()
     : hasValue_(false) {
@@ -136,11 +144,13 @@ class Optional {
   }
 
   void assign(Optional&& src) {
-    if (src.hasValue()) {
-      assign(std::move(src.value()));
-      src.clear();
-    } else {
-      clear();
+    if (this != &src) {
+      if (src.hasValue()) {
+        assign(std::move(src.value()));
+        src.clear();
+      } else {
+        clear();
+      }
     }
   }
 
@@ -201,15 +211,24 @@ class Optional {
     }
   }
 
-  const Value& value() const {
-    assert(hasValue());
+  const Value& value() const& {
+    require_value();
     return value_;
   }
 
-  Value& value() {
-    assert(hasValue());
+  Value& value() & {
+    require_value();
     return value_;
   }
+
+  Value value() && {
+    require_value();
+    return std::move(value_);
+  }
+
+  const Value* get_pointer() const&  { return hasValue_ ? &value_ : nullptr; }
+        Value* get_pointer()      &  { return hasValue_ ? &value_ : nullptr; }
+        Value* get_pointer()      && = delete;
 
   bool hasValue() const { return hasValue_; }
 
@@ -217,13 +236,31 @@ class Optional {
     return hasValue();
   }
 
-  const Value& operator*() const { return value(); }
-        Value& operator*()       { return value(); }
+  const Value& operator*() const&  { return value(); }
+        Value& operator*()      &  { return value(); }
+        Value  operator*()      && { return std::move(value()); }
 
   const Value* operator->() const { return &value(); }
         Value* operator->()       { return &value(); }
 
+  // Return a copy of the value if set, or a given default if not.
+  template <class U>
+  Value value_or(U&& dflt) const& {
+    return hasValue_ ? value_ : std::forward<U>(dflt);
+  }
+
+  template <class U>
+  Value value_or(U&& dflt) && {
+    return hasValue_ ? std::move(value_) : std::forward<U>(dflt);
+  }
+
  private:
+  void require_value() const {
+    if (!hasValue_) {
+      throw OptionalEmptyException();
+    }
+  }
+
   template<class... Args>
   void construct(Args&&... args) {
     const void* ptr = &value_;
@@ -243,12 +280,12 @@ class Optional {
 
 template<class T>
 const T* get_pointer(const Optional<T>& opt) {
-  return opt ? &opt.value() : nullptr;
+  return opt.get_pointer();
 }
 
 template<class T>
 T* get_pointer(Optional<T>& opt) {
-  return opt ? &opt.value() : nullptr;
+  return opt.get_pointer();
 }
 
 template<class T>
@@ -268,11 +305,27 @@ Opt make_optional(T&& v) {
   return Opt(std::forward<T>(v));
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// Comparisons.
+
 template<class V>
-bool operator< (const Optional<V>& a, const Optional<V>& b) {
-  if (a.hasValue() != b.hasValue()) { return a.hasValue() < b.hasValue(); }
-  if (a.hasValue())                 { return a.value()    < b.value(); }
-  return false;
+bool operator==(const Optional<V>& a, const V& b) {
+  return a.hasValue() && a.value() == b;
+}
+
+template<class V>
+bool operator!=(const Optional<V>& a, const V& b) {
+  return !(a == b);
+}
+
+template<class V>
+bool operator==(const V& a, const Optional<V>& b) {
+  return b.hasValue() && b.value() == a;
+}
+
+template<class V>
+bool operator!=(const V& a, const Optional<V>& b) {
+  return !(a == b);
 }
 
 template<class V>
@@ -283,18 +336,15 @@ bool operator==(const Optional<V>& a, const Optional<V>& b) {
 }
 
 template<class V>
-bool operator<=(const Optional<V>& a, const Optional<V>& b) {
-  return !(b < a);
-}
-
-template<class V>
 bool operator!=(const Optional<V>& a, const Optional<V>& b) {
-  return !(b == a);
+  return !(a == b);
 }
 
 template<class V>
-bool operator>=(const Optional<V>& a, const Optional<V>& b) {
-  return !(a < b);
+bool operator< (const Optional<V>& a, const Optional<V>& b) {
+  if (a.hasValue() != b.hasValue()) { return a.hasValue() < b.hasValue(); }
+  if (a.hasValue())                 { return a.value()    < b.value(); }
+  return false;
 }
 
 template<class V>
@@ -302,20 +352,28 @@ bool operator> (const Optional<V>& a, const Optional<V>& b) {
   return b < a;
 }
 
-// To supress comparability of Optional<T> with T, despite implicit conversion.
+template<class V>
+bool operator<=(const Optional<V>& a, const Optional<V>& b) {
+  return !(b < a);
+}
+
+template<class V>
+bool operator>=(const Optional<V>& a, const Optional<V>& b) {
+  return !(a < b);
+}
+
+// Suppress comparability of Optional<T> with T, despite implicit conversion.
 template<class V> bool operator< (const Optional<V>&, const V& other) = delete;
 template<class V> bool operator<=(const Optional<V>&, const V& other) = delete;
-template<class V> bool operator==(const Optional<V>&, const V& other) = delete;
-template<class V> bool operator!=(const Optional<V>&, const V& other) = delete;
 template<class V> bool operator>=(const Optional<V>&, const V& other) = delete;
 template<class V> bool operator> (const Optional<V>&, const V& other) = delete;
 template<class V> bool operator< (const V& other, const Optional<V>&) = delete;
 template<class V> bool operator<=(const V& other, const Optional<V>&) = delete;
-template<class V> bool operator==(const V& other, const Optional<V>&) = delete;
-template<class V> bool operator!=(const V& other, const Optional<V>&) = delete;
 template<class V> bool operator>=(const V& other, const Optional<V>&) = delete;
 template<class V> bool operator> (const V& other, const Optional<V>&) = delete;
 
+///////////////////////////////////////////////////////////////////////////////
+
 } // namespace folly
 
-#endif//FOLLY_OPTIONAL_H_
+#endif // FOLLY_OPTIONAL_H_

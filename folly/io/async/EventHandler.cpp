@@ -1,4 +1,6 @@
 /*
+ * Copyright 2015 Facebook, Inc.
+ *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements. See the NOTICE file
  * distributed with this work for additional information
@@ -16,8 +18,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#include "folly/io/async/EventHandler.h"
-#include "folly/io/async/EventBase.h"
+#include <folly/io/async/EventHandler.h>
+#include <folly/io/async/EventBase.h>
 
 #include <assert.h>
 
@@ -145,10 +147,19 @@ void EventHandler::libeventCallback(int fd, short events, void* arg) {
   EventHandler* handler = reinterpret_cast<EventHandler*>(arg);
   assert(fd == handler->event_.ev_fd);
 
+  auto observer = handler->eventBase_->getExecutionObserver();
+  if (observer) {
+    observer->starting(reinterpret_cast<uintptr_t>(handler));
+  }
+
   // this can't possibly fire if handler->eventBase_ is nullptr
   (void) handler->eventBase_->bumpHandlingTime();
 
   handler->handlerReady(events);
+
+  if (observer) {
+    observer->stopped(reinterpret_cast<uintptr_t>(handler));
+  }
 }
 
 void EventHandler::setEventBase(EventBase* eventBase) {
@@ -156,7 +167,7 @@ void EventHandler::setEventBase(EventBase* eventBase) {
   eventBase_ = eventBase;
 }
 
-bool EventHandler::isPending() {
+bool EventHandler::isPending() const {
   if (event_.ev_flags & EVLIST_ACTIVE) {
     if (event_.ev_res & EV_READ) {
       return true;

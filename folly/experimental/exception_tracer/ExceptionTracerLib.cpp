@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,18 +20,19 @@
 
 #include <glog/logging.h>
 
-#include "folly/Portability.h"
-#include "folly/experimental/exception_tracer/StackTrace.h"
-#include "folly/experimental/exception_tracer/ExceptionAbi.h"
-#include "folly/experimental/exception_tracer/ExceptionTracer.h"
-#include "folly/experimental/symbolizer/Symbolizer.h"
+#include <folly/Portability.h>
+#include <folly/experimental/exception_tracer/StackTrace.h>
+#include <folly/experimental/exception_tracer/ExceptionAbi.h>
+#include <folly/experimental/exception_tracer/ExceptionTracer.h>
+#include <folly/experimental/symbolizer/Symbolizer.h>
 
 namespace __cxxabiv1 {
 
 extern "C" {
 FOLLY_NORETURN void __cxa_throw(void* thrownException,
-                 std::type_info* type, void (*destructor)(void));
-void* __cxa_begin_catch(void* excObj);
+                                std::type_info* type,
+                                void (*destructor)(void*));
+void* __cxa_begin_catch(void* excObj) throw();
 FOLLY_NORETURN void __cxa_rethrow(void);
 void __cxa_end_catch(void);
 }
@@ -48,8 +49,9 @@ FOLLY_TLS StackTraceStack caughtExceptions;
 pthread_once_t initialized = PTHREAD_ONCE_INIT;
 
 extern "C" {
-FOLLY_NORETURN typedef void (*CxaThrowType)(void*, std::type_info*,
-                                            void (*)(void));
+FOLLY_NORETURN typedef void (*CxaThrowType)(void*,
+                                            std::type_info*,
+                                            void (*)(void*));
 typedef void* (*CxaBeginCatchType)(void*);
 FOLLY_NORETURN typedef void (*CxaRethrowType)(void);
 typedef void (*CxaEndCatchType)(void);
@@ -123,8 +125,9 @@ void moveTopException(StackTraceStack& from, StackTraceStack& to) {
 
 namespace __cxxabiv1 {
 
-void __cxa_throw(void* thrownException, std::type_info* type,
-                 void (*destructor)(void)) {
+void __cxa_throw(void* thrownException,
+                 std::type_info* type,
+                 void (*destructor)(void*)) {
   addActiveException();
   orig_cxa_throw(thrownException, type, destructor);
 }
@@ -139,7 +142,7 @@ void __cxa_rethrow() {
   orig_cxa_rethrow();
 }
 
-void* __cxa_begin_catch(void *excObj) {
+void* __cxa_begin_catch(void *excObj) throw() {
   // excObj is a pointer to the unwindHeader in __cxa_exception
   moveTopException(activeExceptions, caughtExceptions);
   return orig_cxa_begin_catch(excObj);

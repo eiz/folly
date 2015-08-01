@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 
-#include "folly/String.h"
-#include "folly/Format.h"
+#include <folly/String.h>
+
+#include <folly/Format.h>
+#include <folly/ScopeGuard.h>
 
 #include <cerrno>
 #include <cstdarg>
@@ -23,72 +25,78 @@
 #include <stdexcept>
 #include <iterator>
 #include <cctype>
+#include <string.h>
 #include <glog/logging.h>
 
 namespace folly {
 
 namespace {
 
-inline void stringPrintfImpl(std::string& output, const char* format,
-                             va_list args) {
-  // Tru to the space at the end of output for our output buffer.
-  // Find out write point then inflate its size temporarily to its
-  // capacity; we will later shrink it to the size needed to represent
-  // the formatted string.  If this buffer isn't large enough, we do a
-  // resize and try again.
-
-  const auto write_point = output.size();
-  auto remaining = output.capacity() - write_point;
-  output.resize(output.capacity());
-
+int stringAppendfImplHelper(char* buf,
+                            size_t bufsize,
+                            const char* format,
+                            va_list args) {
   va_list args_copy;
   va_copy(args_copy, args);
-  int bytes_used = vsnprintf(&output[write_point], remaining, format,
-                             args_copy);
+  int bytes_used = vsnprintf(buf, bufsize, format, args_copy);
   va_end(args_copy);
-  if (bytes_used < 0) {
-    throw std::runtime_error(
-      to<std::string>("Invalid format string; snprintf returned negative "
-                      "with format string: ", format));
-  } else if (bytes_used < remaining) {
-    // There was enough room, just shrink and return.
-    output.resize(write_point + bytes_used);
-  } else {
-    output.resize(write_point + bytes_used + 1);
-    remaining = bytes_used + 1;
-    va_list args_copy;
-    va_copy(args_copy, args);
-    bytes_used = vsnprintf(&output[write_point], remaining, format,
-                           args_copy);
-    va_end(args_copy);
-    if (bytes_used + 1 != remaining) {
-      throw std::runtime_error(
-        to<std::string>("vsnprint retry did not manage to work "
-                        "with format string: ", format));
-    }
-    output.resize(write_point + bytes_used);
-  }
+  return bytes_used;
 }
 
-}  // anon namespace
+void stringAppendfImpl(std::string& output, const char* format, va_list args) {
+  // Very simple; first, try to avoid an allocation by using an inline
+  // buffer.  If that fails to hold the output string, allocate one on
+  // the heap, use it instead.
+  //
+  // It is hard to guess the proper size of this buffer; some
+  // heuristics could be based on the number of format characters, or
+  // static analysis of a codebase.  Or, we can just pick a number
+  // that seems big enough for simple cases (say, one line of text on
+  // a terminal) without being large enough to be concerning as a
+  // stack variable.
+  std::array<char, 128> inline_buffer;
+
+  int bytes_used = stringAppendfImplHelper(
+      inline_buffer.data(), inline_buffer.size(), format, args);
+  if (bytes_used < 0) {
+    throw std::runtime_error(to<std::string>(
+        "Invalid format string; snprintf returned negative "
+        "with format string: ",
+        format));
+  }
+
+  if (static_cast<size_t>(bytes_used) < inline_buffer.size()) {
+    output.append(inline_buffer.data(), bytes_used);
+    return;
+  }
+
+  // Couldn't fit.  Heap allocate a buffer, oh well.
+  std::unique_ptr<char[]> heap_buffer(new char[bytes_used + 1]);
+  int final_bytes_used =
+      stringAppendfImplHelper(heap_buffer.get(), bytes_used + 1, format, args);
+  // The second call can take fewer bytes if, for example, we were printing a
+  // string buffer with null-terminating char using a width specifier -
+  // vsnprintf("%.*s", buf.size(), buf)
+  CHECK(bytes_used >= final_bytes_used);
+
+  // We don't keep the trailing '\0' in our output string
+  output.append(heap_buffer.get(), final_bytes_used);
+}
+
+} // anon namespace
 
 std::string stringPrintf(const char* format, ...) {
-  // snprintf will tell us how large the output buffer should be, but
-  // we then have to call it a second time, which is costly.  By
-  // guestimating the final size, we avoid the double snprintf in many
-  // cases, resulting in a performance win.  We use this constructor
-  // of std::string to avoid a double allocation, though it does pad
-  // the resulting string with nul bytes.  Our guestimation is twice
-  // the format string size, or 32 bytes, whichever is larger.  This
-  // is a hueristic that doesn't affect correctness but attempts to be
-  // reasonably fast for the most common cases.
-  std::string ret(std::max(32UL, strlen(format) * 2), '\0');
-  ret.resize(0);
-
   va_list ap;
   va_start(ap, format);
-  stringPrintfImpl(ret, format, ap);
-  va_end(ap);
+  SCOPE_EXIT {
+    va_end(ap);
+  };
+  return stringVPrintf(format, ap);
+}
+
+std::string stringVPrintf(const char* format, va_list ap) {
+  std::string ret;
+  stringAppendfImpl(ret, format, ap);
   return ret;
 }
 
@@ -97,17 +105,31 @@ std::string stringPrintf(const char* format, ...) {
 std::string& stringAppendf(std::string* output, const char* format, ...) {
   va_list ap;
   va_start(ap, format);
-  stringPrintfImpl(*output, format, ap);
-  va_end(ap);
+  SCOPE_EXIT {
+    va_end(ap);
+  };
+  return stringVAppendf(output, format, ap);
+}
+
+std::string& stringVAppendf(std::string* output,
+                            const char* format,
+                            va_list ap) {
+  stringAppendfImpl(*output, format, ap);
   return *output;
 }
 
 void stringPrintf(std::string* output, const char* format, ...) {
-  output->clear();
   va_list ap;
   va_start(ap, format);
-  stringPrintfImpl(*output, format, ap);
-  va_end(ap);
+  SCOPE_EXIT {
+    va_end(ap);
+  };
+  return stringVPrintf(output, format, ap);
+}
+
+void stringVPrintf(std::string* output, const char* format, va_list ap) {
+  output->clear();
+  stringAppendfImpl(*output, format, ap);
 };
 
 namespace {
@@ -203,7 +225,7 @@ const PrettySuffix kPrettySISuffixes[] = {
   { "z", 1e-21L },
   { "y", 1e-24L },
   { " ", 0 },
-  { 0, 0} 
+  { 0, 0}
 };
 
 const PrettySuffix* const kPrettySuffixes[PRETTY_NUM_TYPES] = {
@@ -247,7 +269,7 @@ std::string prettyPrint(double val, PrettyType type, bool addSpace) {
 
 //TODO:
 //1) Benchmark & optimize
-double prettyToDouble(folly::StringPiece *const prettyString, 
+double prettyToDouble(folly::StringPiece *const prettyString,
                       const PrettyType type) {
   double value = folly::to<double>(prettyString);
   while (prettyString->size() > 0 && std::isspace(prettyString->front())) {
@@ -278,13 +300,13 @@ double prettyToDouble(folly::StringPiece *const prettyString,
             prettyString->toString(), "\""));
   }
   prettyString->advance(longestPrefixLen);
-  return suffixes[bestPrefixId].val ? value * suffixes[bestPrefixId].val : 
+  return suffixes[bestPrefixId].val ? value * suffixes[bestPrefixId].val :
                                       value;
 }
 
 double prettyToDouble(folly::StringPiece prettyString, const PrettyType type){
   double result = prettyToDouble(&prettyString, type);
-  detail::enforceWhitespace(prettyString.data(), 
+  detail::enforceWhitespace(prettyString.data(),
                             prettyString.data() + prettyString.size());
   return result;
 }
@@ -308,8 +330,20 @@ fbstring errnoStr(int err) {
 
   // https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man3/strerror_r.3.html
   // http://www.kernel.org/doc/man-pages/online/pages/man3/strerror.3.html
-#if defined(__APPLE__) || defined(__FreeBSD__) || \
-    ((_POSIX_C_SOURCE >= 200112L || _XOPEN_SOURCE >= 600) && !_GNU_SOURCE)
+#if defined(_WIN32) && (defined(__MINGW32__) || defined(_MSC_VER))
+  // mingw64 has no strerror_r, but Windows has strerror_s, which C11 added
+  // as well. So maybe we should use this across all platforms (together
+  // with strerrorlen_s). Note strerror_r and _s have swapped args.
+  int r = strerror_s(buf, sizeof(buf), err);
+  if (r != 0) {
+    result = to<fbstring>(
+      "Unknown error ", err,
+      " (strerror_r failed with error ", errno, ")");
+  } else {
+    result.assign(buf);
+  }
+#elif defined(FOLLY_HAVE_XSI_STRERROR_R) || \
+  defined(__APPLE__) || defined(__ANDROID__)
   // Using XSI-compatible strerror_r
   int r = strerror_r(err, buf, sizeof(buf));
 
@@ -327,6 +361,147 @@ fbstring errnoStr(int err) {
 #endif
 
   return result;
+}
+
+namespace {
+
+void toLowerAscii8(char& c) {
+  // Branchless tolower, based on the input-rotating trick described
+  // at http://www.azillionmonkeys.com/qed/asmexample.html
+  //
+  // This algorithm depends on an observation: each uppercase
+  // ASCII character can be converted to its lowercase equivalent
+  // by adding 0x20.
+
+  // Step 1: Clear the high order bit. We'll deal with it in Step 5.
+  unsigned char rotated = c & 0x7f;
+  // Currently, the value of rotated, as a function of the original c is:
+  //   below 'A':   0- 64
+  //   'A'-'Z':    65- 90
+  //   above 'Z':  91-127
+
+  // Step 2: Add 0x25 (37)
+  rotated += 0x25;
+  // Now the value of rotated, as a function of the original c is:
+  //   below 'A':   37-101
+  //   'A'-'Z':    102-127
+  //   above 'Z':  128-164
+
+  // Step 3: clear the high order bit
+  rotated &= 0x7f;
+  //   below 'A':   37-101
+  //   'A'-'Z':    102-127
+  //   above 'Z':    0- 36
+
+  // Step 4: Add 0x1a (26)
+  rotated += 0x1a;
+  //   below 'A':   63-127
+  //   'A'-'Z':    128-153
+  //   above 'Z':   25- 62
+
+  // At this point, note that only the uppercase letters have been
+  // transformed into values with the high order bit set (128 and above).
+
+  // Step 5: Shift the high order bit 2 spaces to the right: the spot
+  // where the only 1 bit in 0x20 is.  But first, how we ignored the
+  // high order bit of the original c in step 1?  If that bit was set,
+  // we may have just gotten a false match on a value in the range
+  // 128+'A' to 128+'Z'.  To correct this, need to clear the high order
+  // bit of rotated if the high order bit of c is set.  Since we don't
+  // care about the other bits in rotated, the easiest thing to do
+  // is invert all the bits in c and bitwise-and them with rotated.
+  rotated &= ~c;
+  rotated >>= 2;
+
+  // Step 6: Apply a mask to clear everything except the 0x20 bit
+  // in rotated.
+  rotated &= 0x20;
+
+  // At this point, rotated is 0x20 if c is 'A'-'Z' and 0x00 otherwise
+
+  // Step 7: Add rotated to c
+  c += rotated;
+}
+
+void toLowerAscii32(uint32_t& c) {
+  // Besides being branchless, the algorithm in toLowerAscii8() has another
+  // interesting property: None of the addition operations will cause
+  // an overflow in the 8-bit value.  So we can pack four 8-bit values
+  // into a uint32_t and run each operation on all four values in parallel
+  // without having to use any CPU-specific SIMD instructions.
+  uint32_t rotated = c & uint32_t(0x7f7f7f7fL);
+  rotated += uint32_t(0x25252525L);
+  rotated &= uint32_t(0x7f7f7f7fL);
+  rotated += uint32_t(0x1a1a1a1aL);
+
+  // Step 5 involves a shift, so some bits will spill over from each
+  // 8-bit value into the next.  But that's okay, because they're bits
+  // that will be cleared by the mask in step 6 anyway.
+  rotated &= ~c;
+  rotated >>= 2;
+  rotated &= uint32_t(0x20202020L);
+  c += rotated;
+}
+
+void toLowerAscii64(uint64_t& c) {
+  // 64-bit version of toLower32
+  uint64_t rotated = c & uint64_t(0x7f7f7f7f7f7f7f7fL);
+  rotated += uint64_t(0x2525252525252525L);
+  rotated &= uint64_t(0x7f7f7f7f7f7f7f7fL);
+  rotated += uint64_t(0x1a1a1a1a1a1a1a1aL);
+  rotated &= ~c;
+  rotated >>= 2;
+  rotated &= uint64_t(0x2020202020202020L);
+  c += rotated;
+}
+
+} // anon namespace
+
+void toLowerAscii(char* str, size_t length) {
+  static const size_t kAlignMask64 = 7;
+  static const size_t kAlignMask32 = 3;
+
+  // Convert a character at a time until we reach an address that
+  // is at least 32-bit aligned
+  size_t n = (size_t)str;
+  n &= kAlignMask32;
+  n = std::min(n, length);
+  size_t offset = 0;
+  if (n != 0) {
+    n = std::min(4 - n, length);
+    do {
+      toLowerAscii8(str[offset]);
+      offset++;
+    } while (offset < n);
+  }
+
+  n = (size_t)(str + offset);
+  n &= kAlignMask64;
+  if ((n != 0) && (offset + 4 <= length)) {
+    // The next address is 32-bit aligned but not 64-bit aligned.
+    // Convert the next 4 bytes in order to get to the 64-bit aligned
+    // part of the input.
+    toLowerAscii32(*(uint32_t*)(str + offset));
+    offset += 4;
+  }
+
+  // Convert 8 characters at a time
+  while (offset + 8 <= length) {
+    toLowerAscii64(*(uint64_t*)(str + offset));
+    offset += 8;
+  }
+
+  // Convert 4 characters at a time
+  while (offset + 4 <= length) {
+    toLowerAscii32(*(uint32_t*)(str + offset));
+    offset += 4;
+  }
+
+  // Convert any characters remaining after the last 4-byte aligned group
+  while (offset < length) {
+    toLowerAscii8(str[offset]);
+    offset++;
+  }
 }
 
 namespace detail {
@@ -385,4 +560,3 @@ size_t hexDumpLine(const void* ptr, size_t offset, size_t size,
 # undef DMGL_TYPES
 # undef DMGL_RET_POSTFIX
 #endif
-

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/sorted_vector_types.h"
+#include <folly/sorted_vector_types.h>
 #include <gtest/gtest.h>
 #include <list>
 
@@ -149,10 +149,12 @@ TEST(SortedVectorTypes, SimpleMapTest) {
   m[32] = 100.0;
   check_invariant(m);
   EXPECT_TRUE(m.count(32) == 1);
+  EXPECT_DOUBLE_EQ(100.0, m.at(32));
   EXPECT_FALSE(m.find(32) == m.end());
   m.erase(32);
   EXPECT_TRUE(m.find(32) == m.end());
   check_invariant(m);
+  EXPECT_THROW(m.at(32), std::out_of_range);
 
   sorted_vector_map<int,float> m2 = m;
   EXPECT_TRUE(m2 == m);
@@ -207,7 +209,7 @@ TEST(SortedVectorTypes, Sizes) {
   typedef sorted_vector_set<int,std::less<int>,
     std::allocator<int>,OneAtATimePolicy> SetT;
   typedef sorted_vector_map<int,int,std::less<int>,
-    std::allocator<int>,OneAtATimePolicy> MapT;
+    std::allocator<std::pair<int,int>>,OneAtATimePolicy> MapT;
 
   EXPECT_EQ(sizeof(SetT), sizeof(std::vector<int>));
   EXPECT_EQ(sizeof(MapT), sizeof(std::vector<std::pair<int,int> >));
@@ -278,7 +280,7 @@ TEST(SortedVectorTypes, GrowthPolicy) {
 
   std::list<CountCopyCtor> v;
   for (int i = 0; i < 20; ++i) {
-    v.push_back(CountCopyCtor(20 + i));
+    v.emplace_back(20 + i);
   }
   a.insert(v.begin(), v.end());
   check_invariant(a);
@@ -300,6 +302,7 @@ TEST(SortedVectorTest, EmptyTest) {
   sorted_vector_map<int,int> emptyMap;
   EXPECT_TRUE(emptyMap.lower_bound(10) == emptyMap.end());
   EXPECT_TRUE(emptyMap.find(10) == emptyMap.end());
+  EXPECT_THROW(emptyMap.at(10), std::out_of_range);
 }
 
 TEST(SortedVectorTest, MoveTest) {
@@ -318,4 +321,18 @@ TEST(SortedVectorTest, MoveTest) {
 
   EXPECT_EQ(*m[5], 5);
   EXPECT_EQ(*m[10], 10);
+}
+
+TEST(SortedVectorTest, ShrinkTest) {
+  sorted_vector_set<int> s;
+  int i = 0;
+  // Hopefully your resize policy doubles when capacity is full, or this will
+  // hang forever :(
+  while (s.capacity() == s.size()) {
+    s.insert(i++);
+  }
+  s.shrink_to_fit();
+  // The standard does not actually enforce that this be true, but assume that
+  // vector::shrink_to_fit respects the caller.
+  EXPECT_EQ(s.capacity(), s.size());
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,9 +32,9 @@
 #include <boost/type_traits.hpp>
 #include <glog/logging.h>
 
-#include "folly/Memory.h"
-#include "folly/SmallLocks.h"
-#include "folly/ThreadLocal.h"
+#include <folly/Memory.h>
+#include <folly/MicroSpinLock.h>
+#include <folly/ThreadLocal.h>
 
 namespace folly { namespace detail {
 

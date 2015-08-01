@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,10 +23,10 @@
 #include <utility>
 #include <boost/intrusive/slist.hpp>
 
-#include "folly/Conv.h"
-#include "folly/Likely.h"
-#include "folly/Malloc.h"
-#include "folly/Memory.h"
+#include <folly/Conv.h>
+#include <folly/Likely.h>
+#include <folly/Malloc.h>
+#include <folly/Memory.h>
 
 namespace folly {
 
@@ -84,7 +84,8 @@ class Arena {
     size = roundUp(size);
     bytesUsed_ += size;
 
-    if (LIKELY(end_ - ptr_ >= size)) {
+    assert(ptr_ <= end_);
+    if (LIKELY((size_t)(end_ - ptr_) >= size)) {
       // Fast path: there's enough room in the current block
       char* r = ptr_;
       ptr_ += size;
@@ -118,7 +119,6 @@ class Arena {
     return bytesUsed_;
   }
 
- private:
   // not copyable
   Arena(const Arena&) = delete;
   Arena& operator=(const Arena&) = delete;
@@ -127,11 +127,12 @@ class Arena {
   Arena(Arena&&) = default;
   Arena& operator=(Arena&&) = default;
 
+ private:
   struct Block;
   typedef boost::intrusive::slist_member_hook<
     boost::intrusive::tag<Arena>> BlockLink;
 
-  struct Block {
+  struct FOLLY_ALIGNED_MAX Block {
     BlockLink link;
 
     // Allocate a block with at least size bytes of storage.
@@ -147,16 +148,15 @@ class Arena {
     }
 
    private:
-    Block() { }
-    ~Block() { }
-  } __attribute__((aligned));
-  // This should be alignas(std::max_align_t) but neither alignas nor
-  // max_align_t are supported by gcc 4.6.2.
+    Block() = default;
+    ~Block() = default;
+  };
 
  public:
   static constexpr size_t kDefaultMinBlockSize = 4096 - sizeof(Block);
   static constexpr size_t kNoSizeLimit = 0;
   static constexpr size_t kDefaultMaxAlign = alignof(Block);
+  static constexpr size_t kBlockOverhead = sizeof(Block);
 
  private:
   bool isAligned(uintptr_t address) const {
@@ -244,6 +244,6 @@ struct IsArenaAllocator<SysArena> : std::true_type { };
 
 }  // namespace folly
 
-#include "folly/Arena-inl.h"
+#include <folly/Arena-inl.h>
 
 #endif /* FOLLY_ARENA_H_ */

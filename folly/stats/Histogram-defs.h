@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 #ifndef FOLLY_HISTOGRAM_DEFS_H_
 #define FOLLY_HISTOGRAM_DEFS_H_
 
-#include "folly/Conv.h"
+#include <folly/Conv.h>
 
 #include <glog/logging.h>
 
@@ -36,7 +36,9 @@ HistogramBuckets<T, BucketT>::HistogramBuckets(ValueType bucketSize,
   CHECK_GT(bucketSize_, ValueType(0));
   CHECK_LT(min_, max_);
 
-  unsigned int numBuckets = (max - min) / bucketSize;
+  // Deliberately make this a signed type, because we're about
+  // to compare it against max-min, which is nominally signed, too.
+  int numBuckets = (max - min) / bucketSize;
   // Round up if the bucket size does not fit evenly
   if (numBuckets * bucketSize < max - min) {
     ++numBuckets;
@@ -57,6 +59,17 @@ unsigned int HistogramBuckets<T, BucketType>::getBucketIdx(
     // the 1 is the below_min bucket
     return ((value - min_) / bucketSize_) + 1;
   }
+}
+
+template <typename T, typename BucketType>
+template <typename CountFn>
+const uint64_t HistogramBuckets<T, BucketType>::computeTotalCount(
+    CountFn countFromBucket) const {
+  uint64_t count = 0;
+  for (unsigned int n = 0; n < buckets_.size(); ++n) {
+    count += countFromBucket(const_cast<const BucketType&>(buckets_[n]));
+  }
+  return count;
 }
 
 template <typename T, typename BucketType>

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,9 @@
 #ifndef FOLLY_BENCHMARK_H_
 #define FOLLY_BENCHMARK_H_
 
-#include "folly/Portability.h"
-#include "folly/Preprocessor.h" // for FB_ANONYMOUS_VARIABLE
+#include <folly/ScopeGuard.h>
+#include <folly/Portability.h>
+#include <folly/Preprocessor.h> // for FB_ANONYMOUS_VARIABLE
 #include <cassert>
 #include <ctime>
 #include <boost/function_types/function_arity.hpp>
@@ -26,6 +27,7 @@
 #include <glog/logging.h>
 #include <gflags/gflags.h>
 #include <limits>
+#include <type_traits>
 
 DECLARE_bool(benchmark);
 
@@ -56,13 +58,15 @@ namespace detail {
  */
 enum Clock { DEFAULT_CLOCK_ID = CLOCK_REALTIME };
 
+typedef std::pair<uint64_t, unsigned int> TimeIterPair;
+
 /**
  * Adds a benchmark wrapped in a std::function. Only used
  * internally. Pass by value is intentional.
  */
 void addBenchmarkImpl(const char* file,
                       const char* name,
-                      std::function<uint64_t(unsigned int)>);
+                      std::function<TimeIterPair(unsigned int)>);
 
 /**
  * Takes the difference between two timespec values. end is assumed to
@@ -73,10 +77,11 @@ inline uint64_t timespecDiff(timespec end, timespec start) {
     assert(end.tv_nsec >= start.tv_nsec);
     return end.tv_nsec - start.tv_nsec;
   }
-  assert(end.tv_sec > start.tv_sec &&
-         end.tv_sec - start.tv_sec <
+  assert(end.tv_sec > start.tv_sec);
+  auto diff = uint64_t(end.tv_sec - start.tv_sec);
+  assert(diff <
          std::numeric_limits<uint64_t>::max() / 1000000000UL);
-  return (end.tv_sec - start.tv_sec) * 1000000000UL
+  return diff * 1000000000UL
     + end.tv_nsec - start.tv_nsec;
 }
 
@@ -114,7 +119,7 @@ struct BenchmarkSuspender {
   }
 
   BenchmarkSuspender(const BenchmarkSuspender &) = delete;
-  BenchmarkSuspender(BenchmarkSuspender && rhs) {
+  BenchmarkSuspender(BenchmarkSuspender && rhs) noexcept {
     start = rhs.start;
     rhs.start.tv_nsec = rhs.start.tv_sec = 0;
   }
@@ -146,13 +151,19 @@ struct BenchmarkSuspender {
     CHECK_EQ(0, clock_gettime(detail::DEFAULT_CLOCK_ID, &start));
   }
 
+  template <class F>
+  auto dismissing(F f) -> typename std::result_of<F()>::type {
+    SCOPE_EXIT { rehire(); };
+    dismiss();
+    return f();
+  }
+
   /**
-   * This helps the macro definition. To get around the dangers of
-   * operator bool, returns a pointer to member (which allows no
-   * arithmetic).
+   * This is for use inside of if-conditions, used in BENCHMARK macros.
+   * If-conditions bypass the explicit on operator bool.
    */
-  operator int BenchmarkSuspender::*() const {
-    return nullptr;
+  explicit operator bool() const {
+    return false;
   }
 
   /**
@@ -185,24 +196,27 @@ typename std::enable_if<
   == 2
 >::type
 addBenchmark(const char* file, const char* name, Lambda&& lambda) {
-  auto execute = [=](unsigned int times) -> uint64_t {
+  auto execute = [=](unsigned int times) {
     BenchmarkSuspender::nsSpent = 0;
     timespec start, end;
+    unsigned int niter;
 
     // CORE MEASUREMENT STARTS
     auto const r1 = clock_gettime(detail::DEFAULT_CLOCK_ID, &start);
-    lambda(times);
+    niter = lambda(times);
     auto const r2 = clock_gettime(detail::DEFAULT_CLOCK_ID, &end);
     // CORE MEASUREMENT ENDS
 
     CHECK_EQ(0, r1);
     CHECK_EQ(0, r2);
 
-    return detail::timespecDiff(end, start) - BenchmarkSuspender::nsSpent;
+    return detail::TimeIterPair(
+      detail::timespecDiff(end, start) - BenchmarkSuspender::nsSpent,
+      niter);
   };
 
   detail::addBenchmarkImpl(file, name,
-                           std::function<uint64_t(unsigned int)>(execute));
+    std::function<detail::TimeIterPair(unsigned int)>(execute));
 }
 
 /**
@@ -218,9 +232,11 @@ typename std::enable_if<
 >::type
 addBenchmark(const char* file, const char* name, Lambda&& lambda) {
   addBenchmark(file, name, [=](unsigned int times) {
+      unsigned int niter = 0;
       while (times-- > 0) {
-        lambda();
+        niter += lambda();
       }
+      return niter;
     });
 }
 
@@ -230,10 +246,23 @@ addBenchmark(const char* file, const char* name, Lambda&& lambda) {
  * good job at eliminating unused variables, and this function fools
  * it into thinking var is in fact needed.
  */
+#ifdef _MSC_VER
+
+#pragma optimize("", off)
+
+template <class T>
+void doNotOptimizeAway(T&& datum) {
+  datum = datum;
+}
+
+#pragma optimize("", on)
+
+#else
 template <class T>
 void doNotOptimizeAway(T&& datum) {
   asm volatile("" : "+r" (datum));
 }
+#endif
 
 } // namespace folly
 
@@ -241,20 +270,34 @@ void doNotOptimizeAway(T&& datum) {
  * Introduces a benchmark function. Used internally, see BENCHMARK and
  * friends below.
  */
-#define BENCHMARK_IMPL(funName, stringName, paramType, paramName)       \
+#define BENCHMARK_IMPL(funName, stringName, rv, paramType, paramName)   \
   static void funName(paramType);                                       \
   static bool FB_ANONYMOUS_VARIABLE(follyBenchmarkUnused) = (           \
     ::folly::addBenchmark(__FILE__, stringName,                         \
-      [](paramType paramName) { funName(paramName); }),                 \
+      [](paramType paramName) -> unsigned { funName(paramName);         \
+                                            return rv; }),              \
     true);                                                              \
   static void funName(paramType paramName)
 
 /**
- * Introduces a benchmark function. Use with either one one or two
- * arguments. The first is the name of the benchmark. Use something
- * descriptive, such as insertVectorBegin. The second argument may be
- * missing, or could be a symbolic counter. The counter dictates how
- * many internal iteration the benchmark does. Example:
+ * Introduces a benchmark function with support for returning the actual
+ * number of iterations. Used internally, see BENCHMARK_MULTI and friends
+ * below.
+ */
+#define BENCHMARK_MULTI_IMPL(funName, stringName, paramType, paramName) \
+  static unsigned funName(paramType);                                   \
+  static bool FB_ANONYMOUS_VARIABLE(follyBenchmarkUnused) = (           \
+    ::folly::addBenchmark(__FILE__, stringName,                         \
+      [](paramType paramName) { return funName(paramName); }),          \
+    true);                                                              \
+  static unsigned funName(paramType paramName)
+
+/**
+ * Introduces a benchmark function. Use with either one or two arguments.
+ * The first is the name of the benchmark. Use something descriptive, such
+ * as insertVectorBegin. The second argument may be missing, or could be a
+ * symbolic counter. The counter dictates how many internal iteration the
+ * benchmark does. Example:
  *
  * BENCHMARK(vectorPushBack) {
  *   vector<int> v;
@@ -270,6 +313,29 @@ void doNotOptimizeAway(T&& datum) {
  */
 #define BENCHMARK(name, ...)                                    \
   BENCHMARK_IMPL(                                               \
+    name,                                                       \
+    FB_STRINGIZE(name),                                         \
+    FB_ARG_2_OR_1(1, ## __VA_ARGS__),                           \
+    FB_ONE_OR_NONE(unsigned, ## __VA_ARGS__),                   \
+    __VA_ARGS__)
+
+/**
+ * Like BENCHMARK above, but allows the user to return the actual
+ * number of iterations executed in the function body. This can be
+ * useful if the benchmark function doesn't know upfront how many
+ * iterations it's going to run or if it runs through a certain
+ * number of test cases, e.g.:
+ *
+ * BENCHMARK_MULTI(benchmarkSomething) {
+ *   std::vector<int> testCases { 0, 1, 1, 2, 3, 5 };
+ *   for (int c : testCases) {
+ *     doSomething(c);
+ *   }
+ *   return testCases.size();
+ * }
+ */
+#define BENCHMARK_MULTI(name, ...)                              \
+  BENCHMARK_MULTI_IMPL(                                         \
     name,                                                       \
     FB_STRINGIZE(name),                                         \
     FB_ONE_OR_NONE(unsigned, ## __VA_ARGS__),                   \
@@ -300,6 +366,13 @@ void doNotOptimizeAway(T&& datum) {
 #define BENCHMARK_PARAM(name, param)                                    \
   BENCHMARK_NAMED_PARAM(name, param, param)
 
+/**
+ * Same as BENCHMARK_PARAM, but allows to return the actual number of
+ * iterations that have been run.
+ */
+#define BENCHMARK_PARAM_MULTI(name, param)                              \
+  BENCHMARK_NAMED_PARAM_MULTI(name, param, param)
+
 /*
  * Like BENCHMARK_PARAM(), but allows a custom name to be specified for each
  * parameter, rather than using the parameter value.
@@ -327,9 +400,23 @@ void doNotOptimizeAway(T&& datum) {
   BENCHMARK_IMPL(                                                       \
       FB_CONCATENATE(name, FB_CONCATENATE(_, param_name)),              \
       FB_STRINGIZE(name) "(" FB_STRINGIZE(param_name) ")",              \
+      iters,                                                            \
       unsigned,                                                         \
       iters) {                                                          \
     name(iters, ## __VA_ARGS__);                                        \
+  }
+
+/**
+ * Same as BENCHMARK_NAMED_PARAM, but allows to return the actual number
+ * of iterations that have been run.
+ */
+#define BENCHMARK_NAMED_PARAM_MULTI(name, param_name, ...)              \
+  BENCHMARK_MULTI_IMPL(                                                 \
+      FB_CONCATENATE(name, FB_CONCATENATE(_, param_name)),              \
+      FB_STRINGIZE(name) "(" FB_STRINGIZE(param_name) ")",              \
+      unsigned,                                                         \
+      iters) {                                                          \
+    return name(iters, ## __VA_ARGS__);                                 \
   }
 
 /**
@@ -360,6 +447,18 @@ void doNotOptimizeAway(T&& datum) {
   BENCHMARK_IMPL(                                               \
     name,                                                       \
     "%" FB_STRINGIZE(name),                                     \
+    FB_ARG_2_OR_1(1, ## __VA_ARGS__),                           \
+    FB_ONE_OR_NONE(unsigned, ## __VA_ARGS__),                   \
+    __VA_ARGS__)
+
+/**
+ * Same as BENCHMARK_RELATIVE, but allows to return the actual number
+ * of iterations that have been run.
+ */
+#define BENCHMARK_RELATIVE_MULTI(name, ...)                     \
+  BENCHMARK_MULTI_IMPL(                                         \
+    name,                                                       \
+    "%" FB_STRINGIZE(name),                                     \
     FB_ONE_OR_NONE(unsigned, ## __VA_ARGS__),                   \
     __VA_ARGS__)
 
@@ -370,23 +469,44 @@ void doNotOptimizeAway(T&& datum) {
   BENCHMARK_RELATIVE_NAMED_PARAM(name, param, param)
 
 /**
+ * Same as BENCHMARK_RELATIVE_PARAM, but allows to return the actual
+ * number of iterations that have been run.
+ */
+#define BENCHMARK_RELATIVE_PARAM_MULTI(name, param)                     \
+  BENCHMARK_RELATIVE_NAMED_PARAM_MULTI(name, param, param)
+
+/**
  * A combination of BENCHMARK_RELATIVE and BENCHMARK_NAMED_PARAM.
  */
 #define BENCHMARK_RELATIVE_NAMED_PARAM(name, param_name, ...)           \
   BENCHMARK_IMPL(                                                       \
       FB_CONCATENATE(name, FB_CONCATENATE(_, param_name)),              \
       "%" FB_STRINGIZE(name) "(" FB_STRINGIZE(param_name) ")",          \
+      iters,                                                            \
       unsigned,                                                         \
       iters) {                                                          \
     name(iters, ## __VA_ARGS__);                                        \
   }
 
 /**
+ * Same as BENCHMARK_RELATIVE_NAMED_PARAM, but allows to return the
+ * actual number of iterations that have been run.
+ */
+#define BENCHMARK_RELATIVE_NAMED_PARAM_MULTI(name, param_name, ...)     \
+  BENCHMARK_MULTI_IMPL(                                                 \
+      FB_CONCATENATE(name, FB_CONCATENATE(_, param_name)),              \
+      "%" FB_STRINGIZE(name) "(" FB_STRINGIZE(param_name) ")",          \
+      unsigned,                                                         \
+      iters) {                                                          \
+    return name(iters, ## __VA_ARGS__);                                 \
+  }
+
+/**
  * Draws a line of dashes.
  */
-#define BENCHMARK_DRAW_LINE()                                   \
-  static bool FB_ANONYMOUS_VARIABLE(follyBenchmarkUnused) = (   \
-    ::folly::addBenchmark(__FILE__, "-", []() { }),             \
+#define BENCHMARK_DRAW_LINE()                                             \
+  static bool FB_ANONYMOUS_VARIABLE(follyBenchmarkUnused) = (             \
+    ::folly::addBenchmark(__FILE__, "-", []() -> unsigned { return 0; }), \
     true);
 
 /**

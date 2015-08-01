@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@
 #include <vector>
 #include <stdexcept>
 
-#include "folly/detail/Stats.h"
+#include <folly/detail/Stats.h>
 
 namespace folly {
 
@@ -143,6 +143,18 @@ class HistogramBuckets {
   }
 
   /**
+   * Computes the total number of values stored across all buckets.
+   *
+   * Runs in O(numBuckets)
+   *
+   * @param countFn A function that takes a const BucketType&, and returns the
+   *                number of values in that bucket
+   * @return Returns the total number of values stored across all buckets
+   */
+  template <typename CountFn>
+  const uint64_t computeTotalCount(CountFn countFromBucket) const;
+
+  /**
    * Determine which bucket the specified percentile falls into.
    *
    * Looks for the bucket that contains the Nth percentile data point.
@@ -238,6 +250,14 @@ class Histogram {
     bucket.count += 1;
   }
 
+  /* Add multiple same data points to the histogram */
+  void addRepeatedValue(ValueType value, uint64_t nSamples) {
+    Bucket& bucket = buckets_.getByValue(value);
+    // TODO: It would be nice to handle overflow here.
+    bucket.sum += value * nSamples;
+    bucket.count += nSamples;
+  }
+
   /*
    * Remove a data point to the histogram
    *
@@ -248,13 +268,31 @@ class Histogram {
   void removeValue(ValueType value) {
     Bucket& bucket = buckets_.getByValue(value);
     // TODO: It would be nice to handle overflow here.
-    bucket.sum -= value;
-    bucket.count -= 1;
+    if (bucket.count > 0) {
+      bucket.sum -= value;
+      bucket.count -= 1;
+    } else {
+      bucket.sum = ValueType();
+      bucket.count = 0;
+    }
+  }
+
+  /* Remove multiple same data points from the histogram */
+  void removeRepeatedValue(ValueType value, uint64_t nSamples) {
+    Bucket& bucket = buckets_.getByValue(value);
+    // TODO: It would be nice to handle overflow here.
+    if (bucket.count >= nSamples) {
+      bucket.sum -= value * nSamples;
+      bucket.count -= nSamples;
+    } else {
+      bucket.sum = ValueType();
+      bucket.count = 0;
+    }
   }
 
   /* Remove all data points from the histogram */
   void clear() {
-    for (int i = 0; i < buckets_.getNumBuckets(); i++) {
+    for (unsigned int i = 0; i < buckets_.getNumBuckets(); i++) {
       buckets_.getByIndex(i).clear();
     }
   }
@@ -270,7 +308,7 @@ class Histogram {
       throw std::invalid_argument("Cannot subtract input histogram.");
     }
 
-    for (int i = 0; i < buckets_.getNumBuckets(); i++) {
+    for (unsigned int i = 0; i < buckets_.getNumBuckets(); i++) {
       buckets_.getByIndex(i) -= hist.buckets_.getByIndex(i);
     }
   }
@@ -286,7 +324,7 @@ class Histogram {
       throw std::invalid_argument("Cannot merge from input histogram.");
     }
 
-    for (int i = 0; i < buckets_.getNumBuckets(); i++) {
+    for (unsigned int i = 0; i < buckets_.getNumBuckets(); i++) {
       buckets_.getByIndex(i) += hist.buckets_.getByIndex(i);
     }
   }
@@ -301,7 +339,7 @@ class Histogram {
       throw std::invalid_argument("Cannot copy from input histogram.");
     }
 
-    for (int i = 0; i < buckets_.getNumBuckets(); i++) {
+    for (unsigned int i = 0; i < buckets_.getNumBuckets(); i++) {
       buckets_.getByIndex(i) = hist.buckets_.getByIndex(i);
     }
   }
@@ -348,6 +386,16 @@ class Histogram {
    */
   ValueType getBucketMax(unsigned int idx) const {
     return buckets_.getBucketMax(idx);
+  }
+
+  /**
+   * Computes the total number of values stored across all buckets.
+   *
+   * Runs in O(numBuckets)
+   */
+  const uint64_t computeTotalCount() const {
+    CountFromBucket countFn;
+    return buckets_.computeTotalCount(countFn);
   }
 
   /*

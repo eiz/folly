@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 #define FOLLY_CHRONO_H_
 
 #include <chrono>
-#include "folly/Portability.h"
+#include <folly/Portability.h>
 
 // gcc 4.6 uses an obsolete name for steady_clock, although the implementation
 // is the same
@@ -30,4 +30,3 @@ typedef monotonic_clock steady_clock;
 #endif
 
 #endif /* FOLLY_CHRONO_H_ */
-

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@
 #include <random>
 #include <memory>
 
-#include "folly/Benchmark.h"
-#include "folly/experimental/Bits.h"
+#include <folly/Benchmark.h>
+#include <folly/experimental/Bits.h>
 
 std::random_device rd;
 
@@ -44,7 +44,7 @@ void benchmarkSet(size_t n, T) {
     CHECK_LE(folly::findLastSet(max), size);
     CHECK_LE(folly::findLastSet(-min), size);
     std::uniform_int_distribution<T> dis(min, max);
-    for (int i = 0; i < k; ++i) {
+    for (size_t i = 0; i < k; ++i) {
       values[i] = dis(gen);
     }
   }
@@ -111,7 +111,7 @@ benchmarkGet(i64)                                 85.78%     8.53ns  117.16M
 #endif
 
 int main(int argc, char *argv[]) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::runBenchmarks();
   return sum.load();
 }

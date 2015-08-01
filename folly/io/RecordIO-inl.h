@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 
 #include <boost/iterator/iterator_facade.hpp>
 
-#include "folly/SpookyHashV2.h"
+#include <folly/SpookyHashV2.h>
 
 namespace folly {
 
@@ -61,6 +61,7 @@ namespace recordio_helpers {
 
 namespace detail {
 
+FOLLY_PACK_PUSH
 struct Header {
   // First 4 bytes of SHA1("zuck"), big-endian
   // Any values will do, except that the sequence must not have a
@@ -75,7 +76,8 @@ struct Header {
   uint32_t dataLength;
   uint64_t dataHash;
   uint32_t headerHash;  // must be last
-} __attribute__((packed));
+} FOLLY_PACK_ATTR;
+FOLLY_PACK_POP
 
 static_assert(offsetof(Header, headerHash) + sizeof(Header::headerHash) ==
               sizeof(Header), "invalid header layout");
@@ -91,4 +93,3 @@ inline RecordInfo findRecord(ByteRange range, uint32_t fileId) {
 }  // namespace recordio_helpers
 
 }  // namespaces
-

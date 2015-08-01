@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,14 +14,18 @@
  * limitations under the License.
  */
 
-#include "folly/experimental/TestUtil.h"
+#include <folly/experimental/TestUtil.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
 
-#include "folly/Conv.h"
-#include "folly/Exception.h"
+#include <boost/regex.hpp>
+#include <folly/Conv.h>
+#include <folly/Exception.h>
+#include <folly/File.h>
+#include <folly/FileUtil.h>
 
 namespace folly {
 namespace test {
@@ -41,7 +45,7 @@ fs::path generateUniquePath(fs::path path, StringPiece namePrefix) {
   return path;
 }
 
-}  // namespce
+}  // namespace
 
 TemporaryFile::TemporaryFile(StringPiece namePrefix,
                              fs::path dir,
@@ -105,6 +109,74 @@ TemporaryDirectory::~TemporaryDirectory() {
       LOG(WARNING) << "recursive delete on destruction failed: " << ec;
     }
   }
+}
+
+ChangeToTempDir::ChangeToTempDir() : initialPath_(fs::current_path()) {
+  std::string p = dir_.path().native();
+  ::chdir(p.c_str());
+}
+
+ChangeToTempDir::~ChangeToTempDir() {
+  std::string p = initialPath_.native();
+  ::chdir(p.c_str());
+}
+
+namespace detail {
+
+bool hasPCREPatternMatch(StringPiece pattern, StringPiece target) {
+  return boost::regex_match(
+    target.begin(),
+    target.end(),
+    boost::regex(pattern.begin(), pattern.end())
+  );
+}
+
+bool hasNoPCREPatternMatch(StringPiece pattern, StringPiece target) {
+  return !hasPCREPatternMatch(pattern, target);
+}
+
+}  // namespace detail
+
+CaptureFD::CaptureFD(int fd) : fd_(fd), readOffset_(0) {
+  oldFDCopy_ = dup(fd_);
+  PCHECK(oldFDCopy_ != -1) << "Could not copy FD " << fd_;
+
+  int file_fd = open(file_.path().c_str(), O_WRONLY|O_CREAT, 0600);
+  PCHECK(dup2(file_fd, fd_) != -1) << "Could not replace FD " << fd_
+    << " with " << file_fd;
+  PCHECK(close(file_fd) != -1) << "Could not close " << file_fd;
+}
+
+void CaptureFD::release() {
+  if (oldFDCopy_ != fd_) {
+    PCHECK(dup2(oldFDCopy_, fd_) != -1) << "Could not restore old FD "
+      << oldFDCopy_ << " into " << fd_;
+    PCHECK(close(oldFDCopy_) != -1) << "Could not close " << oldFDCopy_;
+    oldFDCopy_ = fd_;  // Make this call idempotent
+  }
+}
+
+CaptureFD::~CaptureFD() {
+  release();
+}
+
+std::string CaptureFD::read() {
+  std::string contents;
+  std::string filename = file_.path().native();
+  PCHECK(folly::readFile(filename.c_str(), contents));
+  return contents;
+}
+
+std::string CaptureFD::readIncremental() {
+  std::string filename = file_.path().native();
+  // Yes, I know that I could just keep the file open instead. So sue me.
+  folly::File f(openNoInt(filename.c_str(), O_RDONLY), true);
+  auto size = lseek(f.fd(), 0, SEEK_END) - readOffset_;
+  std::unique_ptr<char[]> buf(new char[size]);
+  auto bytes_read = folly::preadFull(f.fd(), buf.get(), size, readOffset_);
+  PCHECK(size == bytes_read);
+  readOffset_ += size;
+  return std::string(buf.get(), size);
 }
 
 }  // namespace test

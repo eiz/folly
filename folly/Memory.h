@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 #ifndef FOLLY_MEMORY_H_
 #define FOLLY_MEMORY_H_
 
-#include "folly/Traits.h"
+#include <folly/Traits.h>
 
 #include <cstddef>
 #include <cstdlib>
@@ -38,8 +38,45 @@ namespace folly {
  */
 
 template<typename T, typename Dp = std::default_delete<T>, typename... Args>
-std::unique_ptr<T, Dp> make_unique(Args&&... args) {
+typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T, Dp>>::type
+make_unique(Args&&... args) {
   return std::unique_ptr<T, Dp>(new T(std::forward<Args>(args)...));
+}
+
+// Allows 'make_unique<T[]>(10)'. (N3690 s20.9.1.4 p3-4)
+template<typename T, typename Dp = std::default_delete<T>>
+typename std::enable_if<std::is_array<T>::value, std::unique_ptr<T, Dp>>::type
+make_unique(const size_t n) {
+  return std::unique_ptr<T, Dp>(new typename std::remove_extent<T>::type[n]());
+}
+
+// Disallows 'make_unique<T[10]>()'. (N3690 s20.9.1.4 p5)
+template<typename T, typename Dp = std::default_delete<T>, typename... Args>
+typename std::enable_if<
+  std::extent<T>::value != 0, std::unique_ptr<T, Dp>>::type
+make_unique(Args&&...) = delete;
+
+/**
+ *  to_shared_ptr
+ *
+ *  Convert unique_ptr to shared_ptr without specifying the template type
+ *  parameter and letting the compiler deduce it.
+ *
+ *  So you can write this:
+ *
+ *      auto sptr = to_shared_ptr(getSomethingUnique<T>());
+ *
+ *  Instead of this:
+ *
+ *      auto sptr = shared_ptr<T>(getSomethingUnique<T>());
+ *
+ *  Useful when `T` is long, such as:
+ *
+ *      using T = foobar::cpp2::FooBarServiceAsyncClient;
+ */
+template <typename T>
+std::shared_ptr<T> to_shared_ptr(std::unique_ptr<T>&& ptr) {
+  return std::shared_ptr<T>(std::move(ptr));
 }
 
 /**

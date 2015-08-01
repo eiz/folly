@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,9 @@
 #include <thread>
 #include <vector>
 
-#include "folly/Benchmark.h"
-#include "folly/gen/Base.h"
-#include "folly/gen/ParallelMap.h"
+#include <folly/Benchmark.h>
+#include <folly/gen/Base.h>
+#include <folly/gen/ParallelMap.h>
 
 using namespace folly::gen;
 
@@ -64,7 +64,7 @@ BENCHMARK_RELATIVE(FibSumThreads, n) {
       | sum;
     folly::doNotOptimizeAway(result);
   };
-  for (int i = 0; i < kNumThreads; i++) {
+  for (size_t i = 0; i < kNumThreads; i++) {
     workers.push_back(std::thread(fn));
   }
   for (auto& w : workers) { w.join(); }
@@ -85,7 +85,7 @@ BENCHMARK_RELATIVE(FibSumThreads, n) {
 */
 
 int main(int argc, char *argv[]) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::runBenchmarks();
   return 0;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,13 +21,14 @@
 #include <string>
 #include <unordered_map>
 
-#include "folly/FBString.h"
-#include "folly/Range.h"
-#include "folly/String.h"
-#include "folly/experimental/symbolizer/Elf.h"
-#include "folly/experimental/symbolizer/ElfCache.h"
-#include "folly/experimental/symbolizer/Dwarf.h"
-#include "folly/experimental/symbolizer/StackTrace.h"
+#include <folly/FBString.h>
+#include <folly/Range.h>
+#include <folly/String.h>
+#include <folly/io/IOBuf.h>
+#include <folly/experimental/symbolizer/Elf.h>
+#include <folly/experimental/symbolizer/ElfCache.h>
+#include <folly/experimental/symbolizer/Dwarf.h>
+#include <folly/experimental/symbolizer/StackTrace.h>
 
 namespace folly {
 namespace symbolizer {
@@ -38,21 +39,21 @@ class Symbolizer;
  * Frame information: symbol name and location.
  */
 struct SymbolizedFrame {
-  SymbolizedFrame() : found(false) { }
+  SymbolizedFrame() : found(false), name(nullptr) { }
 
   void set(const std::shared_ptr<ElfFile>& file, uintptr_t address);
   void clear() { *this = SymbolizedFrame(); }
 
   bool isSignalFrame;
   bool found;
-  StringPiece name;
+  const char* name;
   Dwarf::LocationInfo location;
 
   /**
    * Demangle the name and return it. Not async-signal-safe; allocates memory.
    */
   fbstring demangledName() const {
-    return demangle(name.fbstr().c_str());
+    return name ? demangle(name) : fbstring();
   }
  private:
   std::shared_ptr<ElfFile> file_;
@@ -174,6 +175,11 @@ class SymbolizePrinter {
                size_t frameCount);
 
   /**
+   * Print a string, no endling newline.
+   */
+  void print(StringPiece sp) { doPrint(sp); }
+
+  /**
    * Print multiple addresses on separate lines, skipping the first
    * skip addresses.
    */
@@ -235,10 +241,15 @@ class OStreamSymbolizePrinter : public SymbolizePrinter {
  */
 class FDSymbolizePrinter : public SymbolizePrinter {
  public:
-  explicit FDSymbolizePrinter(int fd, int options=0);
+  explicit FDSymbolizePrinter(int fd, int options=0,
+                              size_t bufferSize=0);
+  ~FDSymbolizePrinter();
+  void flush();
  private:
   void doPrint(StringPiece sp) override;
+
   int fd_;
+  std::unique_ptr<IOBuf> buffer_;
 };
 
 /**

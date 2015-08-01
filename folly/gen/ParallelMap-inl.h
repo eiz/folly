@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,8 +25,8 @@
 #include <utility>
 #include <vector>
 
-#include "folly/MPMCPipeline.h"
-#include "folly/experimental/EventCount.h"
+#include <folly/MPMCPipeline.h>
+#include <folly/experimental/EventCount.h>
 
 namespace folly { namespace gen { namespace detail {
 
@@ -38,14 +38,14 @@ namespace folly { namespace gen { namespace detail {
  *
  * This type is usually used through the 'pmap' helper function:
  *
- *   auto squares = seq(1, 10) | pmap(4, fibonacci) | sum;
+ *   auto squares = seq(1, 10) | pmap(fibonacci, 4) | sum;
  */
 template<class Predicate>
 class PMap : public Operator<PMap<Predicate>> {
   Predicate pred_;
   size_t nThreads_;
  public:
-  PMap() {}
+  PMap() = default;
 
   PMap(Predicate pred, size_t nThreads)
     : pred_(std::move(pred)),
@@ -75,7 +75,7 @@ class PMap : public Operator<PMap<Predicate>> {
         : pred_(pred),
           pipeline_(nThreads, nThreads) {
         workers_.reserve(nThreads);
-        for (int i = 0; i < nThreads; i++) {
+        for (size_t i = 0; i < nThreads; i++) {
           workers_.push_back(std::thread([this] { this->predApplier(); }));
         }
       }

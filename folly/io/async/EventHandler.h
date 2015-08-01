@@ -1,4 +1,6 @@
 /*
+ * Copyright 2015 Facebook, Inc.
+ *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements. See the NOTICE file
  * distributed with this work for additional information
@@ -19,7 +21,7 @@
 #pragma once
 
 #include <glog/logging.h>
-#include "folly/io/async/EventUtil.h"
+#include <folly/io/async/EventUtil.h>
 #include <boost/noncopyable.hpp>
 #include <stddef.h>
 
@@ -167,7 +169,7 @@ class EventHandler : private boost::noncopyable {
     return registerImpl(events, true);
   }
 
-  bool isPending();
+  bool isPending() const;
 
  private:
   bool registerImpl(uint16_t events, bool internal);

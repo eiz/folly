@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,9 +30,9 @@
 
 #include <boost/iterator/iterator_facade.hpp>
 
-#include "folly/FBString.h"
-#include "folly/Range.h"
-#include "folly/FBVector.h"
+#include <folly/FBString.h>
+#include <folly/Range.h>
+#include <folly/FBVector.h>
 
 // Ignore shadowing warnings within this file, so includers can use -Wshadow.
 #pragma GCC diagnostic push
@@ -189,13 +189,9 @@ namespace folly {
  * an IOBuf chain must be heap allocated.  (All functions to add nodes to a
  * chain require a std::unique_ptr<IOBuf>, which enforces this requrement.)
  *
- * Additionally, no copy-constructor or assignment operator currently exists,
- * so stack-allocated IOBufs may only be moved, not copied.  (Technically
- * nothing is preventing us from adding a copy constructor and assignment
- * operator.  However, it seems like this would add the possibility for some
- * confusion.  We would need to determine if these functions would copy just a
- * single buffer, or the entire chain.)
- *
+ * Copying IOBufs is only meaningful for the head of a chain. The entire chain
+ * is cloned; the IOBufs will become shared, and the old and new IOBufs will
+ * refer to the same underlying memory.
  *
  * IOBuf Sharing
  * -------------
@@ -876,6 +872,33 @@ class IOBuf {
   }
 
   /**
+   * Return true if all IOBufs in this chain are managed by the usual
+   * refcounting mechanism (and so the lifetime of the underlying memory
+   * can be extended by clone()).
+   */
+  bool isManaged() const {
+    const IOBuf* current = this;
+    while (true) {
+      if (!current->isManagedOne()) {
+        return false;
+      }
+      current = current->next_;
+      if (current == this) {
+        return true;
+      }
+    }
+  }
+
+  /**
+   * Return true if this IOBuf is managed by the usual refcounting mechanism
+   * (and so the lifetime of the underlying memory can be extended by
+   * cloneOne()).
+   */
+  bool isManagedOne() const {
+    return sharedInfo();
+  }
+
+  /**
    * Return true if other IOBufs are also pointing to the buffer used by this
    * IOBuf, and false otherwise.
    *
@@ -946,6 +969,39 @@ class IOBuf {
    */
   void unshareOne() {
     if (isSharedOne()) {
+      unshareOneSlow();
+    }
+  }
+
+  /**
+   * Ensure that the memory that IOBufs in this chain refer to will continue to
+   * be allocated for as long as the IOBufs of the chain (or any clone()s
+   * created from this point onwards) is alive.
+   *
+   * This only has an effect for user-owned buffers (created with the
+   * WRAP_BUFFER constructor or wrapBuffer factory function), in which case
+   * those buffers are unshared.
+   */
+  void makeManaged() {
+    if (isChained()) {
+      makeManagedChained();
+    } else {
+      makeManagedOne();
+    }
+  }
+
+  /**
+   * Ensure that the memory that this IOBuf refers to will continue to be
+   * allocated for as long as this IOBuf (or any clone()s created from this
+   * point onwards) is alive.
+   *
+   * This only has an effect for user-owned buffers (created with the
+   * WRAP_BUFFER constructor or wrapBuffer factory function), in which case
+   * those buffers are unshared.
+   */
+  void makeManagedOne() {
+    if (!isManagedOne()) {
+      // We can call the internal function directly; unmanaged implies shared.
       unshareOneSlow();
     }
   }
@@ -1041,6 +1097,29 @@ class IOBuf {
    */
   folly::fbvector<struct iovec> getIov() const;
 
+  /**
+   * Update an existing iovec array with the IOBuf data.
+   *
+   * New iovecs will be appended to the existing vector; anything already
+   * present in the vector will be left unchanged.
+   *
+   * Naturally, the returned iovec data will be invalid if you modify the
+   * buffer chain.
+   */
+  void appendToIov(folly::fbvector<struct iovec>* iov) const;
+
+  /**
+   * Fill an iovec array with the IOBuf data.
+   *
+   * Returns the number of iovec filled. If there are more buffer than
+   * iovec, returns 0. This version is suitable to use with stack iovec
+   * arrays.
+   *
+   * Naturally, the filled iovec data will be invalid if you modify the
+   * buffer chain.
+   */
+  size_t fillIov(struct iovec* iov, size_t len) const;
+
   /*
    * Overridden operator new and delete.
    * These perform specialized memory management to help support
@@ -1093,13 +1172,12 @@ class IOBuf {
    * the head of an IOBuf chain or a solitary IOBuf not part of a chain.  If
    * the move destination is part of a chain, all other IOBufs in the chain
    * will be deleted.
-   *
-   * (We currently don't provide a copy constructor or assignment operator.
-   * The main reason is because it is not clear these operations should copy
-   * the entire chain or just the single IOBuf.)
    */
   IOBuf(IOBuf&& other) noexcept;
   IOBuf& operator=(IOBuf&& other) noexcept;
+
+  IOBuf(const IOBuf& other);
+  IOBuf& operator=(const IOBuf& other);
 
  private:
   enum FlagsEnum : uintptr_t {
@@ -1126,10 +1204,6 @@ class IOBuf {
   struct HeapStorage;
   struct HeapFullStorage;
 
-  // Forbidden copy constructor and assignment opererator
-  IOBuf(IOBuf const &);
-  IOBuf& operator=(IOBuf const &);
-
   /**
    * Create a new IOBuf pointing to an external buffer.
    *
@@ -1144,6 +1218,7 @@ class IOBuf {
 
   void unshareOneSlow();
   void unshareChained();
+  void makeManagedChained();
   void coalesceSlow();
   void coalesceSlow(size_t maxLength);
   // newLength must be the entire length of the buffers between this and
@@ -1262,6 +1337,33 @@ class IOBuf {
 
   static void freeUniquePtrBuffer(void* ptr, void* userData) {
     static_cast<DeleterBase*>(userData)->dispose(ptr);
+  }
+};
+
+/**
+ * Hasher for IOBuf objects. Hashes the entire chain using SpookyHashV2.
+ */
+struct IOBufHash {
+  size_t operator()(const IOBuf& buf) const;
+  size_t operator()(const std::unique_ptr<IOBuf>& buf) const {
+    return buf ? (*this)(*buf) : 0;
+  }
+};
+
+/**
+ * Equality predicate for IOBuf objects. Compares data in the entire chain.
+ */
+struct IOBufEqual {
+  bool operator()(const IOBuf& a, const IOBuf& b) const;
+  bool operator()(const std::unique_ptr<IOBuf>& a,
+                  const std::unique_ptr<IOBuf>& b) const {
+    if (!a && !b) {
+      return true;
+    } else if (!a || !b) {
+      return false;
+    } else {
+      return (*this)(*a, *b);
+    }
   }
 };
 

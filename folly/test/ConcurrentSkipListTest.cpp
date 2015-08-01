@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,9 +24,9 @@
 
 #include <glog/logging.h>
 #include <gflags/gflags.h>
-#include "folly/ConcurrentSkipList.h"
-#include "folly/Foreach.h"
-#include "folly/String.h"
+#include <folly/ConcurrentSkipList.h>
+#include <folly/Foreach.h>
+#include <folly/String.h>
 #include <gtest/gtest.h>
 
 DEFINE_int32(num_threads, 12, "num concurrent threads to test");
@@ -273,7 +273,7 @@ void testConcurrentAdd(int numThreads) {
       << ": could only create " << threads.size() << " threads out of "
       << numThreads;
   }
-  for (int i = 0; i < threads.size(); ++i) {
+  for (size_t i = 0; i < threads.size(); ++i) {
     threads[i].join();
   }
 
@@ -389,7 +389,7 @@ TEST(ConcurrentSkipList, ConcurrentAccess) {
 int main(int argc, char* argv[]) {
   testing::InitGoogleTest(&argc, argv);
   google::InitGoogleLogging(argv[0]);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   return RUN_ALL_TESTS();
 }

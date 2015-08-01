@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/FileUtil.h"
+#include <folly/FileUtil.h>
 
 #include <cerrno>
 #ifdef __APPLE__
@@ -23,7 +23,7 @@
 #include <sys/file.h>
 #include <sys/socket.h>
 
-#include "folly/detail/FileUtilDetail.h"
+#include <folly/detail/FileUtilDetail.h>
 
 namespace folly {
 
@@ -43,7 +43,7 @@ int closeNoInt(int fd) {
   // Interestingly enough, the Single Unix Specification says that the state
   // of the file descriptor is unspecified if close returns EINTR.  In that
   // case, the safe thing to do is also not to retry close() -- leaking a file
-  // descriptor is probably better than closing the wrong file.
+  // descriptor is definitely better than closing the wrong file.
   if (r == -1 && errno == EINTR) {
     r = 0;
   }
@@ -65,7 +65,7 @@ int dup2NoInt(int oldfd, int newfd) {
 int fdatasyncNoInt(int fd) {
 #if defined(__APPLE__)
   return wrapNoInt(fcntl, fd, F_FULLFSYNC);
-#elif defined(__FreeBSD__)
+#elif defined(__FreeBSD__) || defined(_MSC_VER)
   return wrapNoInt(fsync, fd);
 #else
   return wrapNoInt(fdatasync, fd);
@@ -149,4 +149,3 @@ ssize_t pwritevFull(int fd, iovec* iov, int count, off_t offset) {
 #endif
 
 }  // namespaces
-

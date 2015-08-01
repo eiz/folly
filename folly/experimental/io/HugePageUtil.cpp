@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,11 +27,13 @@
 
 #include <gflags/gflags.h>
 
-#include "folly/Format.h"
-#include "folly/Portability.h"
-#include "folly/Range.h"
-#include "folly/ScopeGuard.h"
-#include "folly/experimental/io/HugePages.h"
+#include <folly/File.h>
+#include <folly/Format.h>
+#include <folly/MemoryMapping.h>
+#include <folly/Portability.h>
+#include <folly/Range.h>
+#include <folly/ScopeGuard.h>
+#include <folly/experimental/io/HugePages.h>
 
 DEFINE_bool(cp, false, "Copy file");
 
@@ -51,38 +53,19 @@ void usage(const char* name) {
   exit(1);
 }
 
-void copy(const char* srcFile, const char* destPrefix) {
-  int srcfd = open(srcFile, O_RDONLY);
-  if (srcfd == -1) {
-    throw std::system_error(errno, std::system_category(), "open failed");
-  }
-  SCOPE_EXIT {
-    close(srcfd);
-  };
-  struct stat st;
-  if (fstat(srcfd, &st) == -1) {
-    throw std::system_error(errno, std::system_category(), "fstat failed");
+void copy(const char* srcFile, const char* dest) {
+  fs::path destPath(dest);
+  if (!destPath.is_absolute()) {
+    auto hp = getHugePageSize();
+    CHECK(hp) << "no huge pages available";
+    destPath = fs::canonical_parent(destPath, hp->mountPoint);
   }
 
-  void* start = mmap(nullptr, st.st_size, PROT_READ, MAP_SHARED, srcfd, 0);
-  if (start == MAP_FAILED) {
-    throw std::system_error(errno, std::system_category(), "mmap failed");
-  }
-
-  SCOPE_EXIT {
-    munmap(start, st.st_size);
-  };
-
-  HugePages hp;
-  auto f = hp.create(ByteRange(static_cast<const unsigned char*>(start),
-                               st.st_size),
-                     destPrefix);
-  std::cout << f.path << "\n";
+  mmapFileCopy(srcFile, destPath.c_str());
 }
 
 void list() {
-  HugePages hp;
-  for (auto& p : hp.sizes()) {
+  for (const auto& p : getHugePageSizes()) {
     std::cout << p.size << " " << p.mountPoint << "\n";
   }
 }
@@ -91,7 +74,7 @@ void list() {
 
 
 int main(int argc, char *argv[]) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   if (FLAGS_cp) {
     if (argc != 3) usage(argv[0]);
     copy(argv[1], argv[2]);
@@ -101,4 +84,3 @@ int main(int argc, char *argv[]) {
   }
   return 0;
 }
-

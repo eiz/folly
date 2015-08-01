@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
-#include "folly/Benchmark.h"
-#include "folly/experimental/exception_tracer/ExceptionTracer.h"
+#include <folly/Benchmark.h>
+#include <folly/experimental/exception_tracer/ExceptionTracer.h>
 
 void recurse(int level) {
   if (level == 0) {
@@ -55,9 +55,8 @@ BENCHMARK(ExceptionTracer, iters) {
 }
 
 int main(int argc, char* argv[]) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   google::InitGoogleLogging(argv[0]);
   folly::runBenchmarks();
   return 0;
 }
-

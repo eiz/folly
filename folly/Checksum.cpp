@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,18 +14,25 @@
  * limitations under the License.
  */
 
-#include "folly/Checksum.h"
+#include <folly/Checksum.h>
 #include <algorithm>
 #include <stdexcept>
 #include <boost/crc.hpp>
-#include "folly/CpuId.h"
+#include <folly/CpuId.h>
 
 namespace folly {
 
 namespace detail {
 
-#if FOLLY_X64 && defined(__GNUC__) && defined(__GNUC_MINOR__) && \
-    (((__GNUC__ * 100) + __GNUC_MINOR__) >= 407)
+#ifndef __has_builtin
+  /* nolint */
+  #define __has_builtin(x) 0
+#endif
+
+#if (__has_builtin(__builtin_ia32_crc32qi) && \
+     __has_builtin(__builtin_ia32_crc32di)) || \
+    (FOLLY_X64 && defined(__GNUC__) && defined(__GNUC_MINOR__) && \
+     (((__GNUC__ * 100) + __GNUC_MINOR__) >= 407))
 
 // Fast SIMD implementation of CRC-32C for x86 with SSE 4.2
 uint32_t crc32c_hw(const uint8_t *data, size_t nbytes,

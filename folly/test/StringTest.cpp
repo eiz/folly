@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,13 +14,14 @@
  * limitations under the License.
  */
 
-#include "folly/String.h"
+#include <folly/String.h>
 
+#include <cstdarg>
 #include <random>
 #include <boost/algorithm/string.hpp>
 #include <gtest/gtest.h>
 
-#include "folly/Benchmark.h"
+#include <folly/Benchmark.h>
 
 using namespace folly;
 using namespace std;
@@ -60,11 +61,70 @@ TEST(StringPrintf, Appending) {
   EXPECT_EQ(s, "abc 123");
 }
 
+void vprintfCheck(const char* expected, const char* fmt, ...) {
+  va_list apOrig;
+  va_start(apOrig, fmt);
+  SCOPE_EXIT {
+    va_end(apOrig);
+  };
+  va_list ap;
+  va_copy(ap, apOrig);
+  SCOPE_EXIT {
+    va_end(ap);
+  };
+
+  // Check both APIs for calling stringVPrintf()
+  EXPECT_EQ(expected, stringVPrintf(fmt, ap));
+  va_end(ap);
+  va_copy(ap, apOrig);
+
+  std::string out;
+  stringVPrintf(&out, fmt, ap);
+  va_end(ap);
+  va_copy(ap, apOrig);
+  EXPECT_EQ(expected, out);
+
+  // Check stringVAppendf() as well
+  std::string prefix = "foobar";
+  out = prefix;
+  EXPECT_EQ(prefix + expected, stringVAppendf(&out, fmt, ap));
+  va_end(ap);
+  va_copy(ap, apOrig);
+}
+
+void vprintfError(const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  SCOPE_EXIT {
+    va_end(ap);
+  };
+
+  // OSX's sprintf family does not return a negative number on a bad format
+  // string, but Linux does. It's unclear to me which behavior is more
+  // correct.
+#ifdef HAVE_VSNPRINTF_ERRORS
+  EXPECT_THROW({stringVPrintf(fmt, ap);},
+               std::runtime_error);
+#endif
+}
+
+TEST(StringPrintf, VPrintf) {
+  vprintfCheck("foo", "%s", "foo");
+  vprintfCheck("long string requiring reallocation 1 2 3 0x12345678",
+               "%s %s %d %d %d %#x",
+               "long string", "requiring reallocation", 1, 2, 3, 0x12345678);
+  vprintfError("bogus%", "foo");
+}
+
 TEST(StringPrintf, VariousSizes) {
-  // Test a wide variety of output sizes
-  for (int i = 0; i < 100; ++i) {
+  // Test a wide variety of output sizes, making sure to cross the
+  // vsnprintf buffer boundary implementation detail.
+  for (int i = 0; i < 4096; ++i) {
     string expected(i + 1, 'a');
-    EXPECT_EQ("X" + expected + "X", stringPrintf("X%sX", expected.c_str()));
+    expected = "X" + expected + "X";
+    string result = stringPrintf("%s", expected.c_str());
+    EXPECT_EQ(expected.size(), result.size());
+    EXPECT_EQ(expected, result);
   }
 
   EXPECT_EQ("abc12345678910111213141516171819202122232425xyz",
@@ -95,13 +155,36 @@ TEST(StringPrintf, oldStringAppendf) {
   EXPECT_EQ(string("helloa/b/c/d"), s);
 }
 
-BENCHMARK(new_stringPrintfSmall, iters) {
+// A simple benchmark that tests various output sizes for a simple
+// input; the goal is to measure the output buffer resize code cost.
+void stringPrintfOutputSize(int iters, int param) {
+  string buffer;
+  BENCHMARK_SUSPEND { buffer.resize(param, 'x'); }
+
   for (int64_t i = 0; i < iters; ++i) {
-    int32_t x = int32_t(i);
-    int32_t y = int32_t(i + 1);
-    string s =
-      stringPrintf("msg msg msg msg msg msg msg msg:  %d, %d, %s",
-                   x, y, "hello");
+    string s = stringPrintf("msg: %d, %d, %s", 10, 20, buffer.c_str());
+  }
+}
+
+// The first few of these tend to fit in the inline buffer, while the
+// subsequent ones cross that limit, trigger a second vsnprintf, and
+// exercise a different codepath.
+BENCHMARK_PARAM(stringPrintfOutputSize, 1)
+BENCHMARK_PARAM(stringPrintfOutputSize, 4)
+BENCHMARK_PARAM(stringPrintfOutputSize, 16)
+BENCHMARK_PARAM(stringPrintfOutputSize, 64)
+BENCHMARK_PARAM(stringPrintfOutputSize, 256)
+BENCHMARK_PARAM(stringPrintfOutputSize, 1024)
+
+// Benchmark simple stringAppendf behavior to show a pathology Lovro
+// reported (t5735468).
+BENCHMARK(stringPrintfAppendfBenchmark, iters) {
+  for (unsigned int i = 0; i < iters; ++i) {
+    string s;
+    BENCHMARK_SUSPEND { s.reserve(300000); }
+    for (int j = 0; j < 300000; ++j) {
+      stringAppendf(&s, "%d", 1);
+    }
   }
 }
 
@@ -137,6 +220,11 @@ TEST(Escape, uriEscape) {
                                                         UriEscapeMode::PATH));
   EXPECT_EQ("hello%2c+%2fworld", uriEscape<std::string>("hello, /world",
                                                         UriEscapeMode::QUERY));
+  EXPECT_EQ(
+    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_.~",
+    uriEscape<std::string>(
+      "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_.~")
+  );
 }
 
 TEST(Escape, uriUnescape) {
@@ -519,33 +607,6 @@ TEST(System, errnoStr) {
   EXPECT_EQ(EACCES, errno);
 }
 
-namespace folly_test {
-struct ThisIsAVeryLongStructureName {
-};
-}  // namespace folly_test
-
-#if FOLLY_HAVE_CPLUS_DEMANGLE_V3_CALLBACK
-TEST(System, demangle) {
-  char expected[] = "folly_test::ThisIsAVeryLongStructureName";
-  EXPECT_STREQ(
-      expected,
-      demangle(typeid(folly_test::ThisIsAVeryLongStructureName)).c_str());
-
-  {
-    char buf[sizeof(expected)];
-    EXPECT_EQ(sizeof(expected) - 1,
-              demangle(typeid(folly_test::ThisIsAVeryLongStructureName),
-                       buf, sizeof(buf)));
-    EXPECT_STREQ(expected, buf);
-
-    EXPECT_EQ(sizeof(expected) - 1,
-              demangle(typeid(folly_test::ThisIsAVeryLongStructureName),
-                       buf, 11));
-    EXPECT_STREQ("folly_test", buf);
-  }
-}
-#endif
-
 namespace {
 
 template<template<class,class> class VectorType>
@@ -622,6 +683,13 @@ void splitTest() {
   EXPECT_EQ(parts[0], "d");
   EXPECT_EQ(parts[1], "c");
   EXPECT_EQ(parts[2], "kdbk");
+  parts.clear();
+
+  // test last part is shorter than the delimiter
+  folly::split("bc", "abcd", parts, true);
+  EXPECT_EQ(parts.size(), 2);
+  EXPECT_EQ(parts[0], "a");
+  EXPECT_EQ(parts[1], "d");
   parts.clear();
 
   string orig = "ab2342asdfv~~!";
@@ -895,6 +963,49 @@ TEST(Split, fixed) {
   EXPECT_FALSE(folly::split('.', "a.b", a));
 }
 
+TEST(Split, std_string_fixed) {
+  std::string a, b, c, d;
+
+  EXPECT_TRUE(folly::split<false>('.', "a.b.c.d", a, b, c, d));
+  EXPECT_TRUE(folly::split<false>('.', "a.b.c", a, b, c));
+  EXPECT_TRUE(folly::split<false>('.', "a.b", a, b));
+  EXPECT_TRUE(folly::split<false>('.', "a", a));
+
+  EXPECT_TRUE(folly::split('.', "a.b.c.d", a, b, c, d));
+  EXPECT_TRUE(folly::split('.', "a.b.c", a, b, c));
+  EXPECT_TRUE(folly::split('.', "a.b", a, b));
+  EXPECT_TRUE(folly::split('.', "a", a));
+
+  EXPECT_TRUE(folly::split<false>('.', "a.b.c", a, b, c));
+  EXPECT_EQ("a", a);
+  EXPECT_EQ("b", b);
+  EXPECT_EQ("c", c);
+  EXPECT_FALSE(folly::split<false>('.', "a.b", a, b, c));
+  EXPECT_TRUE(folly::split<false>('.', "a.b.c", a, b));
+  EXPECT_EQ("a", a);
+  EXPECT_EQ("b.c", b);
+
+  EXPECT_TRUE(folly::split('.', "a.b.c", a, b, c));
+  EXPECT_EQ("a", a);
+  EXPECT_EQ("b", b);
+  EXPECT_EQ("c", c);
+  EXPECT_FALSE(folly::split('.', "a.b.c", a, b));
+  EXPECT_FALSE(folly::split('.', "a.b", a, b, c));
+
+  EXPECT_TRUE(folly::split<false>('.', "a.b", a, b));
+  EXPECT_EQ("a", a);
+  EXPECT_EQ("b", b);
+  EXPECT_FALSE(folly::split<false>('.', "a", a, b));
+  EXPECT_TRUE(folly::split<false>('.', "a.b", a));
+  EXPECT_EQ("a.b", a);
+
+  EXPECT_TRUE(folly::split('.', "a.b", a, b));
+  EXPECT_EQ("a", a);
+  EXPECT_EQ("b", b);
+  EXPECT_FALSE(folly::split('.', "a", a, b));
+  EXPECT_FALSE(folly::split('.', "a.b", a));
+}
+
 TEST(Split, fixed_convert) {
   StringPiece a, d;
   int b;
@@ -948,6 +1059,9 @@ TEST(String, join) {
 
   join("_", { "", "f", "a", "c", "e", "b", "o", "o", "k", "" }, output);
   EXPECT_EQ(output, "_f_a_c_e_b_o_o_k_");
+
+  output = join("", input3.begin(), input3.end());
+  EXPECT_EQ(output, "facebook");
 }
 
 TEST(String, hexlify) {
@@ -1027,11 +1141,82 @@ TEST(String, humanify) {
   EXPECT_EQ("0x61ffffffffff", humanify(string("a\xff\xff\xff\xff\xff")));
 }
 
+namespace {
+
+/**
+ * Copy bytes from src to somewhere in the buffer referenced by dst. The
+ * actual starting position of the copy will be the first address in the
+ * destination buffer whose address mod 8 is equal to the src address mod 8.
+ * The caller is responsible for ensuring that the destination buffer has
+ * enough extra space to accommodate the shifted copy.
+ */
+char* copyWithSameAlignment(char* dst, const char* src, size_t length) {
+  const char* originalDst = dst;
+  size_t dstOffset = size_t(dst) & 0x7;
+  size_t srcOffset = size_t(src) & 0x7;
+  while (dstOffset != srcOffset) {
+    dst++;
+    dstOffset++;
+    dstOffset &= 0x7;
+  }
+  CHECK(dst <= originalDst + 7);
+  CHECK((size_t(dst) & 0x7) == (size_t(src) & 0x7));
+  memcpy(dst, src, length);
+  return dst;
+}
+
+void testToLowerAscii(Range<const char*> src) {
+  // Allocate extra space so we can make copies that start at the
+  // same alignment (byte, word, quadword, etc) as the source buffer.
+  char controlBuf[src.size() + 7];
+  char* control = copyWithSameAlignment(controlBuf, src.begin(), src.size());
+
+  char testBuf[src.size() + 7];
+  char* test = copyWithSameAlignment(testBuf, src.begin(), src.size());
+
+  for (size_t i = 0; i < src.size(); i++) {
+    control[i] = tolower(control[i]);
+  }
+  toLowerAscii(test, src.size());
+  for (size_t i = 0; i < src.size(); i++) {
+    EXPECT_EQ(control[i], test[i]);
+  }
+}
+
+} // anon namespace
+
+TEST(String, toLowerAsciiAligned) {
+  static const size_t kSize = 256;
+  char input[kSize];
+  for (size_t i = 0; i < kSize; i++) {
+    input[i] = (char)(i & 0xff);
+  }
+  testToLowerAscii(Range<const char*>(input, kSize));
+}
+
+TEST(String, toLowerAsciiUnaligned) {
+  static const size_t kSize = 256;
+  char input[kSize];
+  for (size_t i = 0; i < kSize; i++) {
+    input[i] = (char)(i & 0xff);
+  }
+  // Test input buffers of several lengths to exercise all the
+  // cases: buffer at the start/middle/end of an aligned block, plus
+  // buffers that span multiple aligned blocks.  The longest test input
+  // is 3 unaligned bytes + 4 32-bit aligned bytes + 8 64-bit aligned
+  // + 4 32-bit aligned + 3 unaligned = 22 bytes.
+  for (size_t length = 1; length < 23; length++) {
+    for (size_t offset = 0; offset + length <= kSize; offset++) {
+      testToLowerAscii(Range<const char*>(input + offset, length));
+    }
+  }
+}
+
 //////////////////////////////////////////////////////////////////////
 
 BENCHMARK(splitOnSingleChar, iters) {
   static const std::string line = "one:two:three:four";
-  for (int i = 0; i < iters << 4; ++i) {
+  for (size_t i = 0; i < iters << 4; ++i) {
     std::vector<StringPiece> pieces;
     folly::split(':', line, pieces);
   }
@@ -1039,7 +1224,7 @@ BENCHMARK(splitOnSingleChar, iters) {
 
 BENCHMARK(splitOnSingleCharFixed, iters) {
   static const std::string line = "one:two:three:four";
-  for (int i = 0; i < iters << 4; ++i) {
+  for (size_t i = 0; i < iters << 4; ++i) {
     StringPiece a, b, c, d;
     folly::split(':', line, a, b, c, d);
   }
@@ -1047,7 +1232,7 @@ BENCHMARK(splitOnSingleCharFixed, iters) {
 
 BENCHMARK(splitOnSingleCharFixedAllowExtra, iters) {
   static const std::string line = "one:two:three:four";
-  for (int i = 0; i < iters << 4; ++i) {
+  for (size_t i = 0; i < iters << 4; ++i) {
     StringPiece a, b, c, d;
     folly::split<false>(':', line, a, b, c, d);
   }
@@ -1055,7 +1240,7 @@ BENCHMARK(splitOnSingleCharFixedAllowExtra, iters) {
 
 BENCHMARK(splitStr, iters) {
   static const std::string line = "one-*-two-*-three-*-four";
-  for (int i = 0; i < iters << 4; ++i) {
+  for (size_t i = 0; i < iters << 4; ++i) {
     std::vector<StringPiece> pieces;
     folly::split("-*-", line, pieces);
   }
@@ -1063,7 +1248,7 @@ BENCHMARK(splitStr, iters) {
 
 BENCHMARK(splitStrFixed, iters) {
   static const std::string line = "one-*-two-*-three-*-four";
-  for (int i = 0; i < iters << 4; ++i) {
+  for (size_t i = 0; i < iters << 4; ++i) {
     StringPiece a, b, c, d;
     folly::split("-*-", line, a, b, c, d);
   }
@@ -1072,7 +1257,7 @@ BENCHMARK(splitStrFixed, iters) {
 BENCHMARK(boost_splitOnSingleChar, iters) {
   static const std::string line = "one:two:three:four";
   bool(*pred)(char) = [] (char c) -> bool { return c == ':'; };
-  for (int i = 0; i < iters << 4; ++i) {
+  for (size_t i = 0; i < iters << 4; ++i) {
     std::vector<boost::iterator_range<std::string::const_iterator> > pieces;
     boost::split(pieces, line, pred);
   }
@@ -1081,7 +1266,7 @@ BENCHMARK(boost_splitOnSingleChar, iters) {
 BENCHMARK(joinCharStr, iters) {
   static const std::vector<std::string> input = {
     "one", "two", "three", "four", "five", "six", "seven" };
-  for (int i = 0; i < iters << 4; ++i) {
+  for (size_t i = 0; i < iters << 4; ++i) {
     std::string output;
     folly::join(':', input, output);
   }
@@ -1090,7 +1275,7 @@ BENCHMARK(joinCharStr, iters) {
 BENCHMARK(joinStrStr, iters) {
   static const std::vector<std::string> input = {
     "one", "two", "three", "four", "five", "six", "seven" };
-  for (int i = 0; i < iters << 4; ++i) {
+  for (size_t i = 0; i < iters << 4; ++i) {
     std::string output;
     folly::join(":", input, output);
   }
@@ -1099,15 +1284,62 @@ BENCHMARK(joinStrStr, iters) {
 BENCHMARK(joinInt, iters) {
   static const auto input = {
     123, 456, 78910, 1112, 1314, 151, 61718 };
-  for (int i = 0; i < iters << 4; ++i) {
+  for (size_t i = 0; i < iters << 4; ++i) {
     std::string output;
     folly::join(":", input, output);
   }
 }
 
+TEST(String, whitespace) {
+  // trimWhitespace:
+  EXPECT_EQ("kavabanga",
+        trimWhitespace("kavabanga"));
+  EXPECT_EQ("kavabanga",
+        trimWhitespace("kavabanga \t \n  "));
+  EXPECT_EQ("kavabanga",
+        trimWhitespace("   \t \r \n \n kavabanga"));
+  EXPECT_EQ("kavabanga",
+        trimWhitespace("\t \r \n   kavabanga \t \n  "));
+  EXPECT_EQ("kavabanga",
+        trimWhitespace("   \t \r \n \n kavabanga"));
+  EXPECT_EQ("kavabanga",
+        trimWhitespace("\t \r \n   kavabanga \t \n  "));
+  EXPECT_EQ(
+    ltrimWhitespace(rtrimWhitespace("kavabanga")),
+    rtrimWhitespace(ltrimWhitespace("kavabanga")));
+  EXPECT_EQ(
+    ltrimWhitespace(rtrimWhitespace("kavabanga  \r\t\n")),
+    rtrimWhitespace(ltrimWhitespace("kavabanga  \r\t\n")));
+  EXPECT_EQ("", trimWhitespace("\t \r \n   \t \n  "));
+  EXPECT_EQ("", trimWhitespace(""));
+  EXPECT_EQ("", trimWhitespace("\t"));
+  EXPECT_EQ("", trimWhitespace("\r"));
+  EXPECT_EQ("", trimWhitespace("\n"));
+  EXPECT_EQ("", trimWhitespace("\t "));
+  EXPECT_EQ("", trimWhitespace("\r  "));
+  EXPECT_EQ("", trimWhitespace("\n   "));
+  EXPECT_EQ("", trimWhitespace("    \t"));
+  EXPECT_EQ("", trimWhitespace("    \r"));
+  EXPECT_EQ("", trimWhitespace("    \n"));
+
+  // ltrimWhitespace:
+  EXPECT_EQ("kavabanga", ltrimWhitespace("\t kavabanga"));
+  EXPECT_EQ("kavabanga \r\n", ltrimWhitespace("\t kavabanga \r\n"));
+  EXPECT_EQ("", ltrimWhitespace("\r "));
+  EXPECT_EQ("", ltrimWhitespace("\n   "));
+  EXPECT_EQ("", ltrimWhitespace("\r   "));
+
+  // rtrimWhitespace:
+  EXPECT_EQ("\t kavabanga", rtrimWhitespace("\t kavabanga"));
+  EXPECT_EQ("\t kavabanga", rtrimWhitespace("\t kavabanga \r\n"));
+  EXPECT_EQ("", rtrimWhitespace("\r "));
+  EXPECT_EQ("", rtrimWhitespace("\n   "));
+  EXPECT_EQ("", rtrimWhitespace("\r   "));
+}
+
 int main(int argc, char *argv[]) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   auto ret = RUN_ALL_TESTS();
   if (!ret) {
     initBenchmark();

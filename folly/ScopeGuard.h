@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@
 #include <functional>
 #include <new>
 
-#include "folly/Preprocessor.h"
-#include "folly/detail/UncaughtExceptionCounter.h"
+#include <folly/Preprocessor.h>
+#include <folly/detail/UncaughtExceptionCounter.h>
 
 namespace folly {
 
@@ -77,7 +77,7 @@ class ScopeGuardImplBase {
   ScopeGuardImplBase()
     : dismissed_(false) {}
 
-  ScopeGuardImplBase(ScopeGuardImplBase&& other)
+  ScopeGuardImplBase(ScopeGuardImplBase&& other) noexcept
     : dismissed_(other.dismissed_) {
     other.dismissed_ = true;
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,8 +27,8 @@
 #include <type_traits>
 #include <mutex>
 #include <boost/thread.hpp>
-#include "folly/Preprocessor.h"
-#include "folly/Traits.h"
+#include <folly/Preprocessor.h>
+#include <folly/Traits.h>
 
 namespace folly {
 
@@ -49,7 +49,9 @@ struct HasLockUnlock {
   enum { value = IsOneOf<T,
          std::mutex, std::recursive_mutex,
          boost::mutex, boost::recursive_mutex, boost::shared_mutex
-#ifndef __APPLE__ // OSX doesn't have timed mutexes
+// Android, OSX, and Cygwin don't have timed mutexes
+#if !defined(ANDROID) && !defined(__ANDROID__) && \
+  !defined(__APPLE__) && !defined(__CYGWIN__)
         ,std::timed_mutex, std::recursive_timed_mutex,
          boost::timed_mutex, boost::recursive_timed_mutex
 #endif
@@ -97,7 +99,9 @@ acquireReadWrite(T& mutex) {
   mutex.lock();
 }
 
-#ifndef __APPLE__ // OSX doesn't have timed mutexes
+// Android, OSX, and Cygwin don't have timed mutexes
+#if !defined(ANDROID) && !defined(__ANDROID__) && \
+  !defined(__APPLE__) && !defined(__CYGWIN__)
 /**
  * Acquires a mutex for reading and writing with timeout by calling
  * .try_lock_for(). This applies to two of the std mutex classes as
@@ -129,7 +133,7 @@ acquireReadWrite(T& mutex,
                  unsigned int milliseconds) {
   return mutex.timed_lock(boost::posix_time::milliseconds(milliseconds));
 }
-#endif // __APPLE__
+#endif // !__ANDROID__ && !__APPLE__ && !__CYGWIN__
 
 /**
  * Releases a mutex previously acquired for reading by calling
@@ -196,36 +200,55 @@ struct Synchronized {
    */
   Synchronized() = default;
 
+ private:
+  static constexpr bool nxCopyCtor{
+      std::is_nothrow_copy_constructible<T>::value};
+  static constexpr bool nxMoveCtor{
+      std::is_nothrow_move_constructible<T>::value};
+
+  /**
+   * Helper constructors to enable Synchronized for
+   * non-default constructible types T.
+   * Guards are created in actual public constructors and are alive
+   * for the time required to construct the object
+   */
+  template <typename Guard>
+  Synchronized(const Synchronized& rhs,
+               const Guard& /*guard*/) noexcept(nxCopyCtor)
+      : datum_(rhs.datum_) {}
+
+  template <typename Guard>
+  Synchronized(Synchronized&& rhs, const Guard& /*guard*/) noexcept(nxMoveCtor)
+      : datum_(std::move(rhs.datum_)) {}
+
+ public:
   /**
    * Copy constructor copies the data (with locking the source and
    * all) but does NOT copy the mutex. Doing so would result in
    * deadlocks.
    */
-  Synchronized(const Synchronized& rhs) {
-    auto guard = rhs.operator->();
-    datum_ = rhs.datum_;
-  }
+  Synchronized(const Synchronized& rhs) noexcept(nxCopyCtor)
+      : Synchronized(rhs, rhs.operator->()) {}
 
   /**
    * Move constructor moves the data (with locking the source and all)
    * but does not move the mutex.
    */
-  Synchronized(Synchronized&& rhs) {
-    auto guard = rhs.operator->();
-    datum_ = std::move(rhs.datum_);
-  }
+  Synchronized(Synchronized&& rhs) noexcept(nxMoveCtor)
+      : Synchronized(std::move(rhs), rhs.operator->()) {}
 
   /**
    * Constructor taking a datum as argument copies it. There is no
    * need to lock the constructing object.
    */
-  explicit Synchronized(const T& rhs) : datum_(rhs) {}
+  explicit Synchronized(const T& rhs) noexcept(nxCopyCtor) : datum_(rhs) {}
 
   /**
    * Constructor taking a datum rvalue as argument moves it. Again,
    * there is no need to lock the constructing object.
    */
-  explicit Synchronized(T&& rhs) : datum_(std::move(rhs)) {}
+  explicit Synchronized(T&& rhs) noexcept(nxMoveCtor)
+      : datum_(std::move(rhs)) {}
 
   /**
    * The canonical assignment operator only assigns the data, NOT the

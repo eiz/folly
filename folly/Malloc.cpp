@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
-#include "folly/Malloc.h"
+#include <folly/Malloc.h>
+
+#include <cstdint>
 
 namespace folly {
 
@@ -25,15 +27,17 @@ namespace folly {
 // with --enable-stats.
 bool usingJEMallocSlow() {
   // Some platforms (*cough* OSX *cough*) require weak symbol checks to be
-  // in the form if (mallctl != NULL). Not if (mallctl) or if (!mallctl) (!!).
-  // http://goo.gl/xpmctm
-  if (allocm == nullptr || rallocm == nullptr || mallctl == nullptr) {
+  // in the form if (mallctl != nullptr). Not if (mallctl) or if (!mallctl)
+  // (!!). http://goo.gl/xpmctm
+  if (mallocx == nullptr || rallocx == nullptr || xallocx == nullptr
+      || sallocx == nullptr || dallocx == nullptr || nallocx == nullptr
+      || mallctl == nullptr) {
     return false;
   }
 
   // "volatile" because gcc optimizes out the reads from *counter, because
   // it "knows" malloc doesn't modify global state...
-  volatile uint64_t* counter;
+  /* nolint */ volatile uint64_t* counter;
   size_t counterLen = sizeof(uint64_t*);
 
   if (mallctl("thread.allocatedp", static_cast<void*>(&counter), &counterLen,
@@ -58,4 +62,3 @@ bool usingJEMallocSlow() {
 }
 
 }  // namespaces
-

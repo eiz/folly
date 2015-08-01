@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/io/IOBufQueue.h"
+#include <folly/io/IOBufQueue.h>
 
 #include <string.h>
 
@@ -71,7 +71,7 @@ IOBufQueue::IOBufQueue(const Options& options)
     chainLength_(0) {
 }
 
-IOBufQueue::IOBufQueue(IOBufQueue&& other)
+IOBufQueue::IOBufQueue(IOBufQueue&& other) noexcept
   : options_(other.options_),
     chainLength_(other.chainLength_),
     head_(std::move(other.head_)) {
@@ -271,6 +271,19 @@ void IOBufQueue::clear() {
     buf = buf->next();
   } while (buf != head_.get());
   chainLength_ = 0;
+}
+
+void IOBufQueue::appendToString(std::string& out) const {
+  if (!head_) {
+    return;
+  }
+  auto len =
+    options_.cacheChainLength ? chainLength_ : head_->computeChainDataLength();
+  out.reserve(out.size() + len);
+
+  for (auto range : *head_) {
+    out.append(reinterpret_cast<const char*>(range.data()), range.size());
+  }
 }
 
 } // folly

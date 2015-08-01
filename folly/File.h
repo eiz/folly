@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,15 @@
 #ifndef FOLLY_FILE_H_
 #define FOLLY_FILE_H_
 
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <fcntl.h>
 #include <unistd.h>
+
+#include <string>
+
+#include <folly/Portability.h>
+#include <folly/Range.h>
 
 namespace folly {
 
@@ -44,6 +49,9 @@ class File {
    * Open and create a file object.  Throws on error.
    */
   explicit File(const char* name, int flags = O_RDONLY, mode_t mode = 0666);
+  explicit File(
+      const std::string& name, int flags = O_RDONLY, mode_t mode = 0666);
+  explicit File(StringPiece name, int flags = O_RDONLY, mode_t mode = 0666);
 
   ~File();
 
@@ -85,7 +93,7 @@ class File {
    * Returns and releases the file descriptor; no longer owned by this File.
    * Returns -1 if the File object didn't wrap a file.
    */
-  int release();
+  int release() noexcept;
 
   /**
    * Swap this File with another.
@@ -93,7 +101,7 @@ class File {
   void swap(File& other);
 
   // movable
-  File(File&&);
+  File(File&&) noexcept;
   File& operator=(File&&);
 
   // FLOCK (INTERPROCESS) LOCKS

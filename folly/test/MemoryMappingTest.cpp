@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,38 +14,61 @@
  * limitations under the License.
  */
 
+#include <sys/mman.h>
 #include <cstdlib>
+#include <folly/FileUtil.h>
+#include <folly/MemoryMapping.h>
 #include <gtest/gtest.h>
-#include "folly/MemoryMapping.h"
 
 namespace folly {
 
 TEST(MemoryMapping, Basic) {
   File f = File::temporary();
   {
-    WritableMemoryMapping m(File(f.fd()), 0, sizeof(double));
-    double volatile* d = m.asWritableRange<double>().data();
+    MemoryMapping m(File(f.fd()), 0, sizeof(double), MemoryMapping::writable());
+    double* d = m.asWritableRange<double>().data();
     *d = 37 * M_PI;
   }
   {
     MemoryMapping m(File(f.fd()), 0, 3);
-    EXPECT_EQ(0, m.asRange<int>().size()); //not big enough
+    EXPECT_EQ(0, m.asRange<int>().size()); // not big enough
   }
   {
     MemoryMapping m(File(f.fd()), 0, sizeof(double));
-    const double volatile* d = m.asRange<double>().data();
+    const double* d = m.asRange<double>().data();
     EXPECT_EQ(*d, 37 * M_PI);
+  }
+}
+
+TEST(MemoryMapping, Move) {
+  File f = File::temporary();
+  {
+    MemoryMapping m(
+        File(f.fd()), 0, sizeof(double) * 2, MemoryMapping::writable());
+    double* d = m.asWritableRange<double>().data();
+    d[0] = 37 * M_PI;
+    MemoryMapping m2(std::move(m));
+    double* d2 = m2.asWritableRange<double>().data();
+    d2[1] = 39 * M_PI;
+  }
+  {
+    MemoryMapping m(File(f.fd()), 0, sizeof(double));
+    const double* d = m.asRange<double>().data();
+    EXPECT_EQ(d[0], 37 * M_PI);
+    MemoryMapping m2(std::move(m));
+    const double* d2 = m2.asRange<double>().data();
+    EXPECT_EQ(d2[1], 39 * M_PI);
   }
 }
 
 TEST(MemoryMapping, DoublyMapped) {
   File f = File::temporary();
   // two mappings of the same memory, different addresses.
-  WritableMemoryMapping mw(File(f.fd()), 0, sizeof(double));
+  MemoryMapping mw(File(f.fd()), 0, sizeof(double), MemoryMapping::writable());
   MemoryMapping mr(File(f.fd()), 0, sizeof(double));
 
-  double volatile* dw = mw.asWritableRange<double>().data();
-  const double volatile* dr = mr.asRange<double>().data();
+  double* dw = mw.asWritableRange<double>().data();
+  const double* dr = mr.asRange<double>().data();
 
   // Show that it's truly the same value, even though the pointers differ
   EXPECT_NE(dw, dr);
@@ -122,6 +145,31 @@ TEST(MemoryMapping, ZeroLength) {
   EXPECT_TRUE(m.mlock(MemoryMapping::LockMode::MUST_LOCK));
   EXPECT_TRUE(m.mlocked());
   EXPECT_EQ(0, m.data().size());
+}
+
+TEST(MemoryMapping, Advise) {
+  File f = File::temporary();
+  size_t kPageSize = 4096;
+  size_t size = kPageSize + 10;  // unaligned file size
+  PCHECK(ftruncateNoInt(f.fd(), size) == 0) << size;
+
+  MemoryMapping m(File(f.fd()));
+
+  // NOTE: advise crashes on bad input.
+
+  m.advise(MADV_NORMAL, 0, kPageSize);
+  m.advise(MADV_NORMAL, 1, kPageSize);
+  m.advise(MADV_NORMAL, 0, 2);
+  m.advise(MADV_NORMAL, 1, 2);
+
+  m.advise(MADV_NORMAL, kPageSize, 0);
+  m.advise(MADV_NORMAL, kPageSize, 1);
+  m.advise(MADV_NORMAL, kPageSize, size - kPageSize);
+
+  auto off = kPageSize + 1;
+  m.advise(MADV_NORMAL, off, size - off);
+
+  EXPECT_DEATH(m.advise(MADV_NORMAL, off, size - off + 1), "");
 }
 
 } // namespace folly

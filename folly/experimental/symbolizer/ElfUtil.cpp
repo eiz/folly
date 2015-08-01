@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 
 
-#include "folly/experimental/symbolizer/Elf.h"
+#include <folly/experimental/symbolizer/Elf.h>
 
 #include <stdio.h>
 
@@ -26,7 +26,7 @@ using namespace folly;
 using namespace folly::symbolizer;
 
 int main(int argc, char *argv[]) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   CHECK_GE(argc, 2);
 
   ElfFile elf(argv[1]);

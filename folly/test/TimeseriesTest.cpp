@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
-#include "folly/stats/BucketedTimeSeries.h"
-#include "folly/stats/BucketedTimeSeries-defs.h"
-#include "folly/stats/MultiLevelTimeSeries.h"
-#include "folly/stats/MultiLevelTimeSeries-defs.h"
+#include <folly/stats/BucketedTimeSeries.h>
+#include <folly/stats/BucketedTimeSeries-defs.h>
+#include <folly/stats/MultiLevelTimeSeries.h>
+#include <folly/stats/MultiLevelTimeSeries-defs.h>
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include "folly/Foreach.h"
+#include <folly/Foreach.h>
 
 using std::chrono::seconds;
 using std::string;
@@ -712,6 +712,52 @@ TEST(BucketedTimeSeries, rateByInterval) {
   EXPECT_EQ(1.0, b.countRate(kDuration, kDuration * 2));
   EXPECT_EQ(1.0, b.countRate(seconds(0), kDuration * 2));
   EXPECT_EQ(1.0, b.countRate(seconds(0), kDuration * 10));
+}
+
+TEST(BucketedTimeSeries, addHistorical) {
+  const int kNumBuckets = 5;
+  const seconds kDuration(10);
+  BucketedTimeSeries<double> b(kNumBuckets, kDuration);
+
+  // Initially fill with a constant rate of data
+  for (seconds i = seconds(0); i < seconds(10); ++i) {
+    b.addValue(i, 10.0);
+  }
+
+  EXPECT_EQ(10.0, b.rate());
+  EXPECT_EQ(10.0, b.avg());
+  EXPECT_EQ(10, b.count());
+
+  // Add some more data points to the middle bucket
+  b.addValue(seconds(4), 40.0);
+  b.addValue(seconds(5), 40.0);
+  EXPECT_EQ(15.0, b.avg());
+  EXPECT_EQ(18.0, b.rate());
+  EXPECT_EQ(12, b.count());
+
+  // Now start adding more current data points, until we are about to roll over
+  // the bucket where we added the extra historical data.
+  for (seconds i = seconds(10); i < seconds(14); ++i) {
+    b.addValue(i, 10.0);
+  }
+  EXPECT_EQ(15.0, b.avg());
+  EXPECT_EQ(18.0, b.rate());
+  EXPECT_EQ(12, b.count());
+
+  // Now roll over the middle bucket
+  b.addValue(seconds(14), 10.0);
+  b.addValue(seconds(15), 10.0);
+  EXPECT_EQ(10.0, b.avg());
+  EXPECT_EQ(10.0, b.rate());
+  EXPECT_EQ(10, b.count());
+
+  // Add more historical values past the bucket window.
+  // These should be ignored.
+  EXPECT_FALSE(b.addValue(seconds(4), 40.0));
+  EXPECT_FALSE(b.addValue(seconds(5), 40.0));
+  EXPECT_EQ(10.0, b.avg());
+  EXPECT_EQ(10.0, b.rate());
+  EXPECT_EQ(10, b.count());
 }
 
 namespace IntMHTS {

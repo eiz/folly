@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,16 +16,16 @@
 #include <thread>
 #include <glog/logging.h>
 
-#include "folly/Benchmark.h"
-#include "folly/File.h"
-#include "folly/gen/Base.h"
-#include "folly/gen/File.h"
+#include <folly/Benchmark.h>
+#include <folly/File.h>
+#include <folly/gen/Base.h>
+#include <folly/gen/File.h>
 
 using namespace folly::gen;
 
 BENCHMARK(ByLine_Pipes, iters) {
   std::thread thread;
-  int rfd;
+  int rfd = -1;
   int wfd;
   BENCHMARK_SUSPEND {
     int p[2];
@@ -37,8 +37,8 @@ BENCHMARK(ByLine_Pipes, iters) {
       PCHECK(::write(wfd, &x, 1) == 1);  // signal startup
       FILE* f = fdopen(wfd, "w");
       PCHECK(f);
-      for (int i = 1; i <= iters; ++i) {
-        fprintf(f, "%d\n", i);
+      for (size_t i = 1; i <= iters; ++i) {
+        fprintf(f, "%zu\n", i);
       }
       fclose(f);
     });
@@ -46,6 +46,7 @@ BENCHMARK(ByLine_Pipes, iters) {
     PCHECK(::read(rfd, &buf, 1) == 1);  // wait for startup
   }
 
+  CHECK_ERR(rfd);
   auto s = byLine(folly::File(rfd)) | eachTo<int64_t>() | sum;
   folly::doNotOptimizeAway(s);
 
@@ -64,7 +65,7 @@ BENCHMARK(ByLine_Pipes, iters) {
 // ============================================================================
 
 int main(int argc, char *argv[]) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::runBenchmarks();
   return 0;
 }

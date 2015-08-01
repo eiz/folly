@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@
 
 #include <boost/iterator/iterator_adaptor.hpp>
 
-#include "folly/Portability.h"
+#include <folly/Portability.h>
 
 /**
  * Code that aids in storing data aligned on block (possibly cache-line)
@@ -503,4 +503,3 @@ class Adaptor {
 }  // namespace folly
 
 #endif /* FOLLY_PADDED_H_ */
-

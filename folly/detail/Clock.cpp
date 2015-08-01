@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/detail/Clock.h"
+#include <folly/detail/Clock.h>
 
 #if __MACH__
 #include <errno.h>
@@ -48,6 +48,10 @@ int clock_getres(clockid_t clk_id, struct timespec* ts) {
 
   return 0;
 }
+#elif _MSC_VER
+// using winpthreads from mingw-w64
+// <pthreads_time.h> has clock_gettime and friends
+// make sure to include <pthread.h> as well for typedefs of timespec/etc
 #else
 #error No clock_gettime(2) compatibility wrapper available for this platform.
 #endif

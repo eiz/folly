@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,19 +19,26 @@
 
 #include <stdlib.h>
 
-#ifndef FOLLY_NO_CONFIG
-#include "folly/folly-config.h"
-#endif
+#include <folly/Portability.h>
 
 extern "C" {
 
 #if FOLLY_HAVE_WEAK_SYMBOLS
-int rallocm(void**, size_t*, size_t, size_t, int) __attribute__((weak));
-int allocm(void**, size_t*, size_t, int) __attribute__((weak));
-int mallctl(const char*, void*, size_t*, void*, size_t) __attribute__((weak));
+void* mallocx(size_t, int) __attribute__((__weak__));
+void* rallocx(void*, size_t, int) __attribute__((__weak__));
+size_t xallocx(void*, size_t, size_t, int) __attribute__((__weak__));
+size_t sallocx(const void*, int) __attribute__((__weak__));
+void dallocx(void*, int) __attribute__((__weak__));
+size_t nallocx(size_t, int) __attribute__((__weak__));
+int mallctl(const char*, void*, size_t*, void*, size_t)
+      __attribute__((__weak__));
 #else
-extern int (*rallocm)(void**, size_t*, size_t, size_t, int);
-extern int (*allocm)(void**, size_t*, size_t, int);
+extern void* (*mallocx)(size_t, int);
+extern void* (*rallocx)(void*, size_t, int);
+extern size_t (*xallocx)(void*, size_t, size_t, int);
+extern size_t (*sallocx)(const void*, int);
+extern void (*dallocx)(void*, int);
+extern size_t (*nallocx)(size_t, int);
 extern int (*mallctl)(const char*, void*, size_t*, void*, size_t);
 #endif
 

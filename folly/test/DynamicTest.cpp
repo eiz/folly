@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,16 +14,22 @@
  * limitations under the License.
  */
 
+#include <folly/dynamic.h>
+
 #include <boost/next_prior.hpp>
 #include <gflags/gflags.h>
 #include <gtest/gtest.h>
 
-#include "folly/Benchmark.h"
-#include "folly/dynamic.h"
-#include "folly/gen/Base.h"
-#include "folly/json.h"
-
 using folly::dynamic;
+
+// This test runs without any external dependencies, including json.
+// This means that if there's a test failure, there's no way to print
+// a useful runtime representation of the folly::dynamic.  We will
+// live with this in order to test dependencies.  This method is
+// normally provided by json.cpp.
+void dynamic::print_as_pseudo_json(std::ostream& out) const {
+  out << "<folly::dynamic object of type " << type_ << ">";
+}
 
 TEST(Dynamic, ObjectBasics) {
   dynamic obj = dynamic::object("a", false);
@@ -46,17 +52,15 @@ TEST(Dynamic, ObjectBasics) {
   EXPECT_EQ(*newObject.keys().begin(), newObject.items().begin()->first);
   EXPECT_EQ(*newObject.values().begin(), newObject.items().begin()->second);
   std::vector<std::pair<folly::fbstring, dynamic>> found;
-  found.push_back(std::make_pair(
-     newObject.keys().begin()->asString(),
-     *newObject.values().begin()));
+  found.emplace_back(newObject.keys().begin()->asString(),
+                     *newObject.values().begin());
 
   EXPECT_EQ(*boost::next(newObject.keys().begin()),
             boost::next(newObject.items().begin())->first);
   EXPECT_EQ(*boost::next(newObject.values().begin()),
             boost::next(newObject.items().begin())->second);
-  found.push_back(std::make_pair(
-      boost::next(newObject.keys().begin())->asString(),
-      *boost::next(newObject.values().begin())));
+  found.emplace_back(boost::next(newObject.keys().begin())->asString(),
+                     *boost::next(newObject.values().begin()));
 
   std::sort(found.begin(), found.end());
 
@@ -82,6 +86,15 @@ TEST(Dynamic, ObjectBasics) {
   d3["123"] = 42;
   EXPECT_EQ(d3.at("123"), 42);
   EXPECT_EQ(d3.at(123), 321);
+
+  dynamic objInsert = folly::dynamic::object();
+  dynamic objA = folly::dynamic::object("1", "2");
+  dynamic objB = folly::dynamic::object("1", "2");
+
+  objInsert.insert("1", std::move(objA));
+  objInsert.insert("1", std::move(objB));
+
+  EXPECT_EQ(objInsert.find("1")->second.size(), 1);
 
   // We don't allow objects as keys in objects.
   EXPECT_ANY_THROW(newObject[d3] = 12);
@@ -144,6 +157,7 @@ TEST(Dynamic, ArrayBasics) {
   EXPECT_EQ(array.at(1), 2);
   EXPECT_EQ(array.at(2), 3);
 
+  EXPECT_ANY_THROW(array.at(-1));
   EXPECT_ANY_THROW(array.at(3));
 
   array.push_back("foo");
@@ -223,42 +237,6 @@ TEST(Dynamic, Conversions) {
   EXPECT_EQ(12.0, num.asDouble());
 }
 
-TEST(Dynamic, StringPtrs) {
-  dynamic str = "12.0";
-  dynamic num = 12.0;
-
-  EXPECT_EQ(0, strcmp(str.c_str(), "12.0"));
-  EXPECT_EQ(0, strncmp(str.data(), "12.0", str.asString().length()));
-
-  EXPECT_ANY_THROW(num.c_str());
-  EXPECT_ANY_THROW(num.data());
-}
-
-TEST(Dynamic, FormattedIO) {
-  std::ostringstream out;
-  dynamic doubl = 123.33;
-  dynamic dint = 12;
-  out << "0x" << std::hex << ++dint << ' ' << std::setprecision(1)
-      << doubl << '\n';
-  EXPECT_EQ(out.str(), "0xd 1e+02\n");
-
-  out.str("");
-  dynamic arrr = { 1, 2, 3 };
-  out << arrr;
-  EXPECT_EQ(out.str(), "[1,2,3]");
-
-  out.str("");
-  dynamic objy = dynamic::object("a", 12);
-  out << objy;
-  EXPECT_EQ(out.str(), R"({"a":12})");
-
-  out.str("");
-  dynamic objy2 = { objy, dynamic::object(12, "str"),
-                          dynamic::object(true, false) };
-  out << objy2;
-  EXPECT_EQ(out.str(), R"([{"a":12},{12:"str"},{true:false}])");
-}
-
 TEST(Dynamic, GetSetDefaultTest) {
   dynamic d1 = dynamic::object("foo", "bar");
   EXPECT_EQ(d1.getDefault("foo", "baz"), "bar");
@@ -291,6 +269,7 @@ TEST(Dynamic, ObjectForwarding) {
 TEST(Dynamic, GetPtr) {
   dynamic array = { 1, 2, "three" };
   EXPECT_TRUE(array.get_ptr(0));
+  EXPECT_FALSE(array.get_ptr(-1));
   EXPECT_FALSE(array.get_ptr(3));
   EXPECT_EQ(dynamic("three"), *array.get_ptr(2));
   const dynamic& carray = array;
@@ -306,19 +285,149 @@ TEST(Dynamic, GetPtr) {
   EXPECT_EQ(dynamic(2), *cobject.get_ptr("two"));
 }
 
-TEST(Dynamic, ArrayGenerator) {
-  // Make sure arrays can be used with folly::gen.
-  using namespace folly::gen;
-  dynamic arr { 1, 2, 3, 4 };
-  EXPECT_EQ(from(arr) | take(3) | member(&dynamic::asInt) | sum, 6);
+TEST(Dynamic, Assignment) {
+  const dynamic ds[] = { { 1, 2, 3 },
+                         dynamic::object("a", true),
+                         24,
+                         26.5,
+                         true,
+                         "hello", };
+  const dynamic dd[] = { { 5, 6 },
+                         dynamic::object("t", "T")(1, 7),
+                         9000,
+                         3.14159,
+                         false,
+                         "world", };
+  for (const auto& source : ds) {
+    for (const auto& dest : dd) {
+      dynamic tmp(dest);
+      EXPECT_EQ(tmp, dest);
+      tmp = source;
+      EXPECT_EQ(tmp, source);
+    }
+  }
+}
+
+folly::fbstring make_long_string() {
+  return folly::fbstring(100, 'a');
+}
+
+TEST(Dynamic, GetDefault) {
+  const auto s = make_long_string();
+  dynamic ds(s);
+  dynamic tmp(s);
+  dynamic d1 = dynamic::object("key1", s);
+  dynamic d2 = dynamic::object("key2", s);
+  dynamic d3 = dynamic::object("key3", s);
+  dynamic d4 = dynamic::object("key4", s);
+  // lvalue - lvalue
+  dynamic ayy("ayy");
+  EXPECT_EQ(ds, d1.getDefault("key1", ayy));
+  EXPECT_EQ(ds, d1.getDefault("key1", ayy));
+  EXPECT_EQ(ds, d1.getDefault("not-a-key", tmp));
+  EXPECT_EQ(ds, tmp);
+  // lvalue - rvalue
+  EXPECT_EQ(ds, d1.getDefault("key1", "ayy"));
+  EXPECT_EQ(ds, d1.getDefault("key1", "ayy"));
+  EXPECT_EQ(ds, d1.getDefault("not-a-key", std::move(tmp)));
+  EXPECT_NE(ds, tmp);
+  // rvalue - lvalue
+  tmp = s;
+  EXPECT_EQ(ds, std::move(d1).getDefault("key1", ayy));
+  EXPECT_NE(ds, d1["key1"]);
+  EXPECT_EQ(ds, std::move(d2).getDefault("not-a-key", tmp));
+  EXPECT_EQ(dynamic(dynamic::object("key2", s)), d2);
+  EXPECT_EQ(ds, tmp);
+  // rvalue - rvalue
+  EXPECT_EQ(ds, std::move(d3).getDefault("key3", std::move(tmp)));
+  EXPECT_NE(ds, d3["key3"]);
+  EXPECT_EQ(ds, tmp);
+  EXPECT_EQ(ds, std::move(d4).getDefault("not-a-key", std::move(tmp)));
+  EXPECT_EQ(dynamic(dynamic::object("key4", s)), d4);
+  EXPECT_NE(ds, tmp);
+}
+
+TEST(Dynamic, GetString) {
+  const dynamic c(make_long_string());
+  dynamic d(make_long_string());
+  dynamic m(make_long_string());
+
+  auto s = make_long_string();
+
+  EXPECT_EQ(s, c.getString());
+  EXPECT_EQ(s, c.getString());
+
+  d.getString() += " hello";
+  EXPECT_EQ(s + " hello", d.getString());
+  EXPECT_EQ(s + " hello", d.getString());
+
+  EXPECT_EQ(s, std::move(m).getString());
+  EXPECT_NE(dynamic(s), m);
+}
+
+TEST(Dynamic, GetSmallThings) {
+  const dynamic cint(5);
+  const dynamic cdouble(5.0);
+  const dynamic cbool(true);
+  dynamic dint(5);
+  dynamic ddouble(5.0);
+  dynamic dbool(true);
+  dynamic mint(5);
+  dynamic mdouble(5.0);
+  dynamic mbool(true);
+
+  EXPECT_EQ(5, cint.getInt());
+  dint.getInt() = 6;
+  EXPECT_EQ(6, dint.getInt());
+  EXPECT_EQ(5, std::move(mint).getInt());
+
+  EXPECT_EQ(5.0, cdouble.getDouble());
+  ddouble.getDouble() = 6.0;
+  EXPECT_EQ(6.0, ddouble.getDouble());
+  EXPECT_EQ(5.0, std::move(mdouble).getDouble());
+
+  EXPECT_EQ(true, cbool.getBool());
+  dbool.getBool() = false;
+  EXPECT_FALSE(dbool.getBool());
+  EXPECT_EQ(true, std::move(mbool).getBool());
+}
+
+TEST(Dynamic, At) {
+  const dynamic cd = dynamic::object("key1", make_long_string());
+  dynamic dd = dynamic::object("key1", make_long_string());
+  dynamic md = dynamic::object("key1", make_long_string());
+
+  dynamic ds(make_long_string());
+  EXPECT_EQ(ds, cd.at("key1"));
+  EXPECT_EQ(ds, cd.at("key1"));
+
+  dd.at("key1").getString() += " hello";
+  EXPECT_EQ(dynamic(make_long_string() + " hello"), dd.at("key1"));
+  EXPECT_EQ(dynamic(make_long_string() + " hello"), dd.at("key1"));
+
+  EXPECT_EQ(ds, std::move(md).at("key1"));
+  EXPECT_NE(ds, md.at("key1"));
+}
+
+TEST(Dynamic, Brackets) {
+  const dynamic cd = dynamic::object("key1", make_long_string());
+  dynamic dd = dynamic::object("key1", make_long_string());
+  dynamic md = dynamic::object("key1", make_long_string());
+
+  dynamic ds(make_long_string());
+  EXPECT_EQ(ds, cd["key1"]);
+  EXPECT_EQ(ds, cd["key1"]);
+
+  dd["key1"].getString() += " hello";
+  EXPECT_EQ(dynamic(make_long_string() + " hello"), dd["key1"]);
+  EXPECT_EQ(dynamic(make_long_string() + " hello"), dd["key1"]);
+
+  EXPECT_EQ(ds, std::move(md)["key1"]);
+  EXPECT_NE(ds, md["key1"]);
 }
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
-  if (FLAGS_benchmark) {
-    folly::runBenchmarks();
-  }
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   return RUN_ALL_TESTS();
 }
-

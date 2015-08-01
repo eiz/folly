@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,10 +74,10 @@ ssize_t wrapFull(F f, int fd, void* buf, size_t count, Offset... offset) {
 template <class F, class... Offset>
 ssize_t wrapvFull(F f, int fd, iovec* iov, int count, Offset... offset) {
   ssize_t totalBytes = 0;
-  ssize_t r;
+  size_t r;
   do {
     r = f(fd, iov, count, offset...);
-    if (r == -1) {
+    if (r == (size_t)-1) {
       if (errno == EINTR) {
         continue;
       }
@@ -109,4 +109,3 @@ ssize_t wrapvFull(F f, int fd, iovec* iov, int count, Offset... offset) {
 }}  // namespaces
 
 #endif /* FOLLY_DETAIL_FILEUTILDETAIL_H_ */
-

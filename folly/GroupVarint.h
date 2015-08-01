@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,23 +17,23 @@
 #ifndef FOLLY_GROUPVARINT_H_
 #define FOLLY_GROUPVARINT_H_
 
-#ifndef __GNUC__
-#error GroupVarint.h requires GCC
+#if !defined(__GNUC__) && !defined(_MSC_VER)
+#error GroupVarint.h requires GCC or MSVC
 #endif
 
-#include "folly/Portability.h"
+#include <folly/Portability.h>
 
 #if FOLLY_X64 || defined(__i386__)
 #define HAVE_GROUP_VARINT 1
 
 #include <cstdint>
 #include <limits>
-#include "folly/detail/GroupVarintDetail.h"
-#include "folly/Bits.h"
-#include "folly/Range.h"
+#include <folly/detail/GroupVarintDetail.h>
+#include <folly/Bits.h>
+#include <folly/Range.h>
 #include <glog/logging.h>
 
-#ifdef __SSSE3__
+#if FOLLY_SSE >= 3
 #include <x86intrin.h>
 namespace folly {
 namespace detail {
@@ -176,7 +176,7 @@ class GroupVarint<uint32_t> : public detail::GroupVarintBase<uint32_t> {
     p += k2+1;
     size_t k3 = b3key(k);
     *d = loadUnaligned<uint32_t>(p) & kMask[k3];
-    p += k3+1;
+    // p += k3+1;
     return end;
   }
 
@@ -188,7 +188,11 @@ class GroupVarint<uint32_t> : public detail::GroupVarintBase<uint32_t> {
     return decode_simple(p, dest, dest+1, dest+2, dest+3);
   }
 
-#ifdef __SSSE3__
+#if FOLLY_SSE >= 3
+  /**
+   * Just like the non-SSSE3 decode below, but with the additional constraint
+   * that we must be able to read at least 17 bytes from the input pointer, p.
+   */
   static const char* decode(const char* p, uint32_t* dest) {
     uint8_t key = p[0];
     __m128i val = _mm_loadu_si128((const __m128i*)(p+1));
@@ -198,6 +202,10 @@ class GroupVarint<uint32_t> : public detail::GroupVarintBase<uint32_t> {
     return p + detail::groupVarintLengths[key];
   }
 
+  /**
+   * Just like decode_simple, but with the additional constraint that
+   * we must be able to read at least 17 bytes from the input pointer, p.
+   */
   static const char* decode(const char* p, uint32_t* a, uint32_t* b,
                             uint32_t* c, uint32_t* d) {
     uint8_t key = p[0];
@@ -206,7 +214,7 @@ class GroupVarint<uint32_t> : public detail::GroupVarintBase<uint32_t> {
     __m128i r = _mm_shuffle_epi8(val, mask);
 
     // Extracting 32 bits at a time out of an XMM register is a SSE4 feature
-#ifdef __SSE4__
+#if FOLLY_SSE >= 4
     *a = _mm_extract_epi32(r, 0);
     *b = _mm_extract_epi32(r, 1);
     *c = _mm_extract_epi32(r, 2);
@@ -504,7 +512,7 @@ class GroupVarintDecoder {
   typedef GroupVarint<T> Base;
   typedef T type;
 
-  GroupVarintDecoder() { }
+  GroupVarintDecoder() = default;
 
   explicit GroupVarintDecoder(StringPiece data,
                               size_t maxCount = (size_t)-1)
@@ -611,4 +619,3 @@ typedef GroupVarintDecoder<uint64_t> GroupVarint64Decoder;
 
 #endif /* FOLLY_X64 || defined(__i386__) */
 #endif /* FOLLY_GROUPVARINT_H_ */
-

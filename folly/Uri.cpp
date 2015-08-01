@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/Uri.h"
+#include <folly/Uri.h>
 
 #include <ctype.h>
 #include <boost/regex.hpp>
@@ -37,7 +37,7 @@ void toLower(String& s) {
 
 }  // namespace
 
-Uri::Uri(StringPiece str) : port_(0) {
+Uri::Uri(StringPiece str) : hasAuthority_(false), port_(0) {
   static const boost::regex uriRegex(
       "([a-zA-Z][a-zA-Z0-9+.-]*):"  // scheme:
       "([^?#]*)"                    // authority and path
@@ -60,6 +60,7 @@ Uri::Uri(StringPiece str) : port_(0) {
                           authorityAndPathMatch,
                           authorityAndPathRegex)) {
     // Does not start with //, doesn't have authority
+    hasAuthority_ = false;
     path_ = authorityAndPath.fbstr();
   } else {
     static const boost::regex authorityRegex(
@@ -84,6 +85,7 @@ Uri::Uri(StringPiece str) : port_(0) {
       port_ = to<uint16_t>(port);
     }
 
+    hasAuthority_ = true;
     username_ = submatch(authorityMatch, 1);
     password_ = submatch(authorityMatch, 2);
     host_ = submatch(authorityMatch, 3);
@@ -128,6 +130,32 @@ fbstring Uri::hostname() const {
     return host_.substr(1, host_.size() - 2);
   }
   return host_;
+}
+
+const std::vector<std::pair<fbstring, fbstring>>& Uri::getQueryParams() {
+  if (!query_.empty() && queryParams_.empty()) {
+    // Parse query string
+    static const boost::regex queryParamRegex(
+        "(^|&)" /*start of query or start of parameter "&"*/
+        "([^=&]*)=?" /*parameter name and "=" if value is expected*/
+        "([^=&]*)" /*parameter value*/
+        "(?=(&|$))" /*forward reference, next should be end of query or
+                      start of next parameter*/);
+    boost::cregex_iterator paramBeginItr(
+        query_.data(), query_.data() + query_.size(), queryParamRegex);
+    boost::cregex_iterator paramEndItr;
+    for (auto itr = paramBeginItr; itr != paramEndItr; itr++) {
+      if (itr->length(2) == 0) {
+        // key is empty, ignore it
+        continue;
+      }
+      queryParams_.emplace_back(
+          fbstring((*itr)[2].first, (*itr)[2].second), // parameter name
+          fbstring((*itr)[3].first, (*itr)[3].second) // parameter value
+          );
+    }
+  }
+  return queryParams_;
 }
 
 }  // namespace folly

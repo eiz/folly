@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
-#include "folly/experimental/exception_tracer/ExceptionTracer.h"
+#include <folly/experimental/exception_tracer/ExceptionTracer.h>
 
 #include <dlfcn.h>
 #include <exception>
 #include <iostream>
 #include <glog/logging.h>
 
-#include "folly/experimental/exception_tracer/ExceptionAbi.h"
-#include "folly/experimental/exception_tracer/StackTrace.h"
-#include "folly/experimental/symbolizer/Symbolizer.h"
-#include "folly/String.h"
+#include <folly/experimental/exception_tracer/ExceptionAbi.h>
+#include <folly/experimental/exception_tracer/StackTrace.h>
+#include <folly/experimental/symbolizer/Symbolizer.h>
+#include <folly/String.h>
 
 namespace {
 
@@ -33,7 +33,7 @@ using namespace ::folly::symbolizer;
 using namespace __cxxabiv1;
 
 extern "C" {
-StackTraceStack* getExceptionStackTraceStack(void) __attribute__((weak));
+StackTraceStack* getExceptionStackTraceStack(void) __attribute__((__weak__));
 typedef StackTraceStack* (*GetExceptionStackTraceStackType)(void);
 GetExceptionStackTraceStackType getExceptionStackTraceStackFn;
 }
@@ -54,7 +54,7 @@ std::ostream& operator<<(std::ostream& out, const ExceptionInfo& info) {
       << (info.frames.size() == 1 ? " frame" : " frames")
       << ")\n";
   try {
-    ssize_t frameCount = info.frames.size();
+    size_t frameCount = info.frames.size();
     // Skip our own internal frames
     static constexpr size_t skip = 3;
 

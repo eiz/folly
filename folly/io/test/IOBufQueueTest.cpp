@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#include "folly/io/IOBufQueue.h"
-#include "folly/Range.h"
+#include <folly/io/IOBufQueue.h>
+#include <folly/Range.h>
 
 #include <gflags/gflags.h>
 #include <gtest/gtest.h>
@@ -351,14 +351,14 @@ TEST(IOBufQueue, PopFirst) {
 
   const size_t numStrings=sizeof(strings)/sizeof(*strings);
   size_t chainLength = 0;
-  for(ssize_t i=0; i<numStrings; ++i) {
+  for(size_t i = 0; i < numStrings; ++i) {
     queue.append(stringToIOBuf(strings[i], strlen(strings[i])));
     checkConsistency(queue);
     chainLength += strlen(strings[i]);
   }
 
   unique_ptr<IOBuf> first;
-  for(ssize_t i=0; i<numStrings; ++i) {
+  for(size_t i = 0; i < numStrings; ++i) {
     checkConsistency(queue);
     EXPECT_EQ(chainLength, queue.front()->computeChainDataLength());
     EXPECT_EQ(chainLength, queue.chainLength());
@@ -378,9 +378,18 @@ TEST(IOBufQueue, PopFirst) {
   EXPECT_EQ(0, queue.chainLength());
 }
 
+TEST(IOBufQueue, AppendToString) {
+  IOBufQueue queue;
+  queue.append("hello ", 6);
+  queue.append("world", 5);
+  std::string s;
+  queue.appendToString(s);
+  EXPECT_EQ("hello world", s);
+}
+
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   return RUN_ALL_TESTS();
 }

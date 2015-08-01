@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,19 +23,19 @@
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
-#include "folly/Benchmark.h"
-#include "folly/stats/Histogram.h"
-#include "folly/stats/Histogram-defs.h"
-#include "folly/ProducerConsumerQueue.h"
+#include <folly/Benchmark.h>
+#include <folly/stats/Histogram.h>
+#include <folly/stats/Histogram-defs.h>
+#include <folly/ProducerConsumerQueue.h>
 
 namespace {
 
 using namespace folly;
 
-typedef int ThroughputType;
+typedef unsigned int ThroughputType;
 typedef ProducerConsumerQueue<ThroughputType> ThroughputQueueType;
 
-typedef long LatencyType;
+typedef unsigned long LatencyType;
 typedef ProducerConsumerQueue<LatencyType> LatencyQueueType;
 
 template<class QueueType>
@@ -138,7 +138,7 @@ struct LatencyTest {
       pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
     }
     for (int i = 0; i < iters_; ++i) {
-      long enqueue_nsec;
+      unsigned long enqueue_nsec;
       while (!queue_.read(enqueue_nsec)) {
       }
 
@@ -232,7 +232,7 @@ BENCHMARK_PARAM(BM_ProducerConsumerLatency, 1048574);
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   runBenchmarks();
   return 0;

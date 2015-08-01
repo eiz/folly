@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/ThreadLocal.h"
+#include <folly/ThreadLocal.h>
 
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -35,7 +35,7 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include "folly/Benchmark.h"
+#include <folly/Benchmark.h>
 
 using namespace folly;
 
@@ -84,6 +84,38 @@ TEST(ThreadLocalPtr, resetNull) {
   EXPECT_EQ(*tl.get(), 4);
   tl.reset();
   EXPECT_FALSE(tl);
+}
+
+TEST(ThreadLocalPtr, TestRelease) {
+  Widget::totalVal_ = 0;
+  ThreadLocalPtr<Widget> w;
+  std::unique_ptr<Widget> wPtr;
+  std::thread([&w, &wPtr]() {
+      w.reset(new Widget());
+      w.get()->val_ += 10;
+
+      wPtr.reset(w.release());
+    }).join();
+  EXPECT_EQ(0, Widget::totalVal_);
+  wPtr.reset();
+  EXPECT_EQ(10, Widget::totalVal_);
+}
+
+TEST(ThreadLocalPtr, CreateOnThreadExit) {
+  Widget::totalVal_ = 0;
+  ThreadLocal<Widget> w;
+  ThreadLocalPtr<int> tl;
+
+  std::thread([&] {
+      tl.reset(new int(1), [&] (int* ptr, TLPDestructionMode mode) {
+        delete ptr;
+        // This test ensures Widgets allocated here are not leaked.
+        ++w.get()->val_;
+        ThreadLocal<Widget> wl;
+        ++wl.get()->val_;
+      });
+    }).join();
+  EXPECT_EQ(2, Widget::totalVal_);
 }
 
 // Test deleting the ThreadLocalPtr object
@@ -169,7 +201,7 @@ TEST(ThreadLocal, SimpleRepeatDestructor) {
 
 TEST(ThreadLocal, InterleavedDestructors) {
   Widget::totalVal_ = 0;
-  ThreadLocal<Widget>* w = nullptr;
+  std::unique_ptr<ThreadLocal<Widget>> w;
   int wVersion = 0;
   const int wVersionMax = 2;
   int thIter = 0;
@@ -199,8 +231,7 @@ TEST(ThreadLocal, InterleavedDestructors) {
     {
       std::lock_guard<std::mutex> g(lock);
       thIterPrev = thIter;
-      delete w;
-      w = new ThreadLocal<Widget>();
+      w.reset(new ThreadLocal<Widget>());
       ++wVersion;
     }
     while (true) {
@@ -346,7 +377,7 @@ class FillObject {
 
 }  // namespace
 
-#if FOLLY_HAVE_STD__THIS_THREAD__SLEEP_FOR
+#if FOLLY_HAVE_STD_THIS_THREAD_SLEEP_FOR
 TEST(ThreadLocal, Stress) {
   constexpr size_t numFillObjects = 250;
   std::array<ThreadLocalPtr<FillObject>, numFillObjects> objects;
@@ -406,6 +437,7 @@ int totalValue() {
 
 }  // namespace
 
+#ifdef FOLLY_HAVE_PTHREAD_ATFORK
 TEST(ThreadLocal, Fork) {
   EXPECT_EQ(1, ptr->value());  // ensure created
   EXPECT_EQ(1, totalValue());
@@ -475,6 +507,7 @@ TEST(ThreadLocal, Fork) {
 
   EXPECT_EQ(1, totalValue());
 }
+#endif
 
 struct HoldsOneTag2 {};
 
@@ -557,9 +590,9 @@ BENCHMARK_DRAW_LINE();
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
-  google::SetCommandLineOptionWithMode(
-    "bm_max_iters", "100000000", google::SET_FLAG_IF_DEFAULT
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::SetCommandLineOptionWithMode(
+    "bm_max_iters", "100000000", gflags::SET_FLAG_IF_DEFAULT
   );
   if (FLAGS_benchmark) {
     folly::runBenchmarks();

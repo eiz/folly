@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,10 +29,10 @@
 #include <memory>
 #include <mutex>
 
-#include "folly/File.h"
-#include "folly/Range.h"
-#include "folly/MemoryMapping.h"
-#include "folly/io/IOBuf.h"
+#include <folly/File.h>
+#include <folly/Range.h>
+#include <folly/MemoryMapping.h>
+#include <folly/io/IOBuf.h>
 
 namespace folly {
 
@@ -175,7 +175,6 @@ RecordInfo validateRecord(ByteRange range, uint32_t fileId);
 
 }  // namespaces
 
-#include "folly/io/RecordIO-inl.h"
+#include <folly/io/RecordIO-inl.h>
 
 #endif /* FOLLY_IO_RECORDIO_H_ */
-

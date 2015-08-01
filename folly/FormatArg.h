@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@
 #define FOLLY_FORMATARG_H_
 
 #include <stdexcept>
-#include "folly/Conv.h"
-#include "folly/Likely.h"
-#include "folly/Portability.h"
-#include "folly/Range.h"
+#include <folly/Conv.h>
+#include <folly/Likely.h>
+#include <folly/Portability.h>
+#include <folly/Range.h>
 
 namespace folly {
 
@@ -46,6 +46,7 @@ struct FormatArg {
       sign(Sign::DEFAULT),
       basePrefix(false),
       thousandsSeparator(false),
+      trailingDot(false),
       width(kDefaultWidth),
       precision(kDefaultPrecision),
       presentation(kDefaultPresentation),
@@ -127,6 +128,11 @@ struct FormatArg {
    * Output thousands separator (comma)
    */
   bool thousandsSeparator;
+
+  /**
+   * Force a trailing decimal on doubles which could be rendered as ints
+   */
+  bool trailingDot;
 
   /**
    * Field width
@@ -267,4 +273,3 @@ inline int FormatArg::splitIntKey() {
 }  // namespace folly
 
 #endif /* FOLLY_FORMATARG_H_ */
-

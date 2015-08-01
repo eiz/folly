@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/io/RecordIO.h"
+#include <folly/io/RecordIO.h>
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -25,11 +25,11 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include "folly/Conv.h"
-#include "folly/FBString.h"
-#include "folly/Random.h"
-#include "folly/experimental/TestUtil.h"
-#include "folly/io/IOBufQueue.h"
+#include <folly/Conv.h>
+#include <folly/FBString.h>
+#include <folly/Random.h>
+#include <folly/experimental/TestUtil.h>
+#include <folly/io/IOBufQueue.h>
 
 DEFINE_int32(random_seed, folly::randomNumberSeed(), "random seed");
 
@@ -94,14 +94,14 @@ TEST(RecordIOTest, SmallRecords) {
   TemporaryFile file;
   {
     RecordIOWriter writer(File(file.fd()));
-    for (int i = 0; i < kSize; ++i) {  // record of size 0 should be ignored
+    for (size_t i = 0; i < kSize; ++i) {  // record of size 0 should be ignored
       writer.write(IOBuf::wrapBuffer(tmp, i));
     }
   }
   {
     RecordIOReader reader(File(file.fd()));
     auto it = reader.begin();
-    for (int i = 1; i < kSize; ++i) {
+    for (size_t i = 1; i < kSize; ++i) {
       ASSERT_FALSE(it == reader.end());
       EXPECT_EQ(StringPiece(tmp, i), sp((it++)->first));
     }
@@ -267,6 +267,6 @@ TEST(RecordIOTest, Randomized) {
 
 int main(int argc, char *argv[]) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   return RUN_ALL_TESTS();
 }

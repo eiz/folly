@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@
 #error "This should only be included by AtomicHashArray.h"
 #endif
 
-#include "folly/Bits.h"
-#include "folly/detail/AtomicHashUtils.h"
+#include <folly/Bits.h>
+#include <folly/detail/AtomicHashUtils.h>
 
 namespace folly {
 
@@ -28,8 +28,9 @@ template <class KeyT, class ValueT,
           class HashFcn, class EqualFcn, class Allocator>
 AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
 AtomicHashArray(size_t capacity, KeyT emptyKey, KeyT lockedKey,
-                KeyT erasedKey, double maxLoadFactor, size_t cacheSize)
-    : capacity_(capacity), maxEntries_(size_t(maxLoadFactor * capacity_ + 0.5)),
+                KeyT erasedKey, double _maxLoadFactor, size_t cacheSize)
+    : capacity_(capacity),
+      maxEntries_(size_t(_maxLoadFactor * capacity_ + 0.5)),
       kEmptyKey_(emptyKey), kLockedKey_(lockedKey), kErasedKey_(erasedKey),
       kAnchorMask_(nextPowTwo(capacity_) - 1), numEntries_(0, cacheSize),
       numPendingEntries_(0, cacheSize), isFull_(0), numErases_(0) {
@@ -113,10 +114,11 @@ insertInternal(KeyT key_in, T&& value) {
         // another thread now does ++numPendingEntries_, we expect it
         // to pass the isFull_.load() test above. (It shouldn't insert
         // a new entry.)
-        FOLLY_SPIN_WAIT(
-          isFull_.load(std::memory_order_acquire) != NO_PENDING_INSERTS
-            && numPendingEntries_.readFull() != 0
-        );
+        detail::atomic_hash_spin_wait([&] {
+          return
+            (isFull_.load(std::memory_order_acquire) != NO_PENDING_INSERTS) &&
+            (numPendingEntries_.readFull() != 0);
+        });
         isFull_.store(NO_PENDING_INSERTS, std::memory_order_release);
 
         if (relaxedLoadKey(*cell) == kEmptyKey_) {
@@ -160,9 +162,9 @@ insertInternal(KeyT key_in, T&& value) {
     }
     DCHECK(relaxedLoadKey(*cell) != kEmptyKey_);
     if (kLockedKey_ == acquireLoadKey(*cell)) {
-      FOLLY_SPIN_WAIT(
-        kLockedKey_ == acquireLoadKey(*cell)
-      );
+      detail::atomic_hash_spin_wait([&] {
+        return kLockedKey_ == acquireLoadKey(*cell);
+      });
     }
 
     const KeyT thisKey = acquireLoadKey(*cell);
@@ -353,14 +355,18 @@ struct AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::aha_iterator
   explicit aha_iterator(ContT* array, size_t offset)
       : aha_(array)
       , offset_(offset)
-  {
-    advancePastEmpty();
-  }
+  {}
 
   // Returns unique index that can be used with findAt().
   // WARNING: The following function will fail silently for hashtable
   // with capacity > 2^32
   uint32_t getIndex() const { return offset_; }
+
+  void advancePastEmpty() {
+    while (offset_ < aha_->capacity_ && !isValid()) {
+      ++offset_;
+    }
+  }
 
  private:
   friend class AtomicHashArray;
@@ -379,12 +385,6 @@ struct AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::aha_iterator
     return aha_->cells_[offset_];
   }
 
-  void advancePastEmpty() {
-    while (offset_ < aha_->capacity_ && !isValid()) {
-      ++offset_;
-    }
-  }
-
   bool isValid() const {
     KeyT key = acquireLoadKey(aha_->cells_[offset_]);
     return key != aha_->kEmptyKey_  &&
@@ -398,5 +398,3 @@ struct AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::aha_iterator
 }; // aha_iterator
 
 } // namespace folly
-
-#undef FOLLY_SPIN_WAIT

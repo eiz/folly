@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,8 +31,8 @@
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
-#include "folly/Conv.h"
-#include "folly/Subprocess.h"
+#include <folly/Conv.h>
+#include <folly/Subprocess.h>
 
 using folly::Subprocess;
 
@@ -74,7 +74,7 @@ void runParent(const char* file) {
 }
 
 int main(int argc, char *argv[]) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   CHECK_EQ(argc, 2);
   if (FLAGS_child) {
     runChild(argv[1]);
@@ -83,4 +83,3 @@ int main(int argc, char *argv[]) {
   }
   return 0;
 }
-

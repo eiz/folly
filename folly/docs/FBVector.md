@@ -128,7 +128,7 @@ the now notorious design of `realloc()` to opaquely perform
 either in-place reallocation or an allocate-memcpy-deallocate
 cycle. Such lack of control subsequently forced all clib-based
 allocator designs to avoid in-place reallocation, and that
-includes C++'s `new` and `std:allocator`. This is a major loss of
+includes C++'s `new` and `std::allocator`. This is a major loss of
 efficiency because an in-place reallocation, being very cheap,
 may mean a much less aggressive growth strategy. In turn that
 means less slack memory and faster reallocations.
@@ -238,5 +238,4 @@ directions may be in improving raw memory copying (`memcpy` is
 not an intrinsic in gcc and does not work terribly well for
 large chunks) and in furthering the collaboration with
 jemalloc. Have fun!
-
 

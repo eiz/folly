@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/experimental/symbolizer/StackTrace.h"
+#include <folly/experimental/symbolizer/StackTrace.h>
 
 // Must be first to ensure that UNW_LOCAL_ONLY is defined
 #define UNW_LOCAL_ONLY 1
@@ -66,7 +66,7 @@ ssize_t getStackTraceSafe(uintptr_t* addresses, size_t maxAddresses) {
     return -1;
   }
   ++addresses;
-  ssize_t count = 1;
+  size_t count = 1;
   for (; count != maxAddresses; ++count, ++addresses) {
     int r = unw_step(&cursor);
     if (r < 0) {

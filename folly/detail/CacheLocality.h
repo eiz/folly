@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,8 +25,8 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#include "folly/Likely.h"
-#include "folly/Portability.h"
+#include <folly/Likely.h>
+#include <folly/Portability.h>
 
 namespace folly { namespace detail {
 
@@ -127,7 +127,7 @@ struct CacheLocality {
 
 /// An attribute that will cause a variable or field to be aligned so that
 /// it doesn't have false sharing with anything at a smaller memory address.
-#define FOLLY_ALIGN_TO_AVOID_FALSE_SHARING __attribute__((aligned(128)))
+#define FOLLY_ALIGN_TO_AVOID_FALSE_SHARING FOLLY_ALIGNED(128)
 
 /// Holds a function pointer to the VDSO implementation of getcpu(2),
 /// if available
@@ -322,6 +322,10 @@ struct AccessSpreader {
   static Getcpu::Func pickGetcpuFunc(size_t numStripes);
 };
 
+template<>
+Getcpu::Func AccessSpreader<std::atomic>::pickGetcpuFunc(size_t);
+
+
 /// An array of kMaxCpus+1 AccessSpreader<Atom> instances constructed
 /// with default params, with the zero-th element having 1 stripe
 template <template<typename> class Atom, size_t kMaxStripe>
@@ -363,4 +367,3 @@ struct AccessSpreaderArray {
 } }
 
 #endif /* FOLLY_DETAIL_CacheLocality_H_ */
-

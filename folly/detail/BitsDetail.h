@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,9 +22,16 @@ namespace detail {
 
 // If we're targeting an architecture with popcnt support, use
 // __builtin_popcount directly, as it's presumably inlined.
-// If not, use runtime detection using __attribute__((ifunc))
+// If not, use runtime detection using __attribute__((__ifunc__))
 // (see Bits.cpp)
-#ifdef __POPCNT__
+#ifdef _MSC_VER
+inline int popcount(unsigned int x) {
+  return __popcnt(x);
+}
+inline int popcountll(unsigned long long x) {
+  return __popcnt64(x);
+}
+#elif defined(__POPCNT__)
 
 inline int popcount(unsigned int x) {
   return __builtin_popcount(x);
@@ -44,4 +51,3 @@ int popcountll(unsigned long long x);
 }  // namespace folly
 
 #endif /* FOLLY_DETAIL_BITSDETAIL_H_ */
-

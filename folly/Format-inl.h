@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,12 +18,26 @@
 #error This file may only be included from Format.h.
 #endif
 
-#include "folly/Exception.h"
-#include "folly/Traits.h"
+#include <array>
+#include <deque>
+#include <map>
+#include <unordered_map>
+#include <vector>
+
+#include <folly/Exception.h>
+#include <folly/FormatTraits.h>
+#include <folly/Traits.h>
+
+// Ignore -Wformat-nonliteral warnings within this file
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
 
 namespace folly {
 
 namespace detail {
+
+// Updates the end of the buffer after the comma separators have been added.
+void insertThousandsGroupingUnsafe(char* start_buffer, char** end_buffer);
 
 extern const char formatHexUpper[256][2];
 extern const char formatHexLower[256][2];
@@ -137,64 +151,20 @@ size_t uintToBinary(char* buffer, size_t bufLen, Uint v) {
 
 }  // namespace detail
 
-
-template <bool containerMode, class... Args>
-Formatter<containerMode, Args...>::Formatter(StringPiece str, Args&&... args)
-  : str_(str),
-    values_(FormatValue<typename std::decay<Args>::type>(
-        std::forward<Args>(args))...) {
+template <class Derived, bool containerMode, class... Args>
+BaseFormatter<Derived, containerMode, Args...>::BaseFormatter(StringPiece str,
+                                                              Args&&... args)
+    : str_(str),
+      values_(FormatValue<typename std::decay<Args>::type>(
+          std::forward<Args>(args))...) {
   static_assert(!containerMode || sizeof...(Args) == 1,
                 "Exactly one argument required in container mode");
 }
 
-template <bool containerMode, class... Args>
-void Formatter<containerMode, Args...>::handleFormatStrError() const {
-  if (crashOnError_) {
-    LOG(FATAL) << "folly::format: bad format string \"" << str_ << "\": " <<
-      folly::exceptionStr(std::current_exception());
-  }
-  throw;
-}
-
-template <bool containerMode, class... Args>
+template <class Derived, bool containerMode, class... Args>
 template <class Output>
-void Formatter<containerMode, Args...>::operator()(Output& out) const {
-  // Catch BadFormatArg and range_error exceptions, and call
-  // handleFormatStrError().
-  //
-  // These exception types indicate a problem with the format string.  Most
-  // format strings are string literals specified by the programmer.  If they
-  // have a problem, this is usually a programmer bug.  We want to crash to
-  // ensure that these are found early on during development.
-  //
-  // BadFormatArg is thrown by the Format.h code, while range_error is thrown
-  // by Conv.h, which is used in several places in our format string
-  // processing.
-  //
-  // (Note: This behavior is slightly dangerous.  If the Output object throws a
-  // BadFormatArg or a range_error, we will also crash the program, even if it
-  // wasn't an issue with the format string.  This seems highly unlikely
-  // though, and none of our current Output objects can throw these errors.)
-  //
-  // We also throw out_of_range errors if the format string references an
-  // argument that isn't present (or a key that isn't present in one of the
-  // argument containers).  However, at the moment we don't crash on these
-  // errors, as it is likely that the container is dynamic at runtime.
-  try {
-    appendOutput(out);
-  } catch (const BadFormatArg& ex) {
-    handleFormatStrError();
-  } catch (const std::range_error& ex) {
-    handleFormatStrError();
-  }
-}
-
-template <bool containerMode, class... Args>
-template <class Output>
-void Formatter<containerMode, Args...>::appendOutput(Output& out) const {
-  auto p = str_.begin();
-  auto end = str_.end();
-
+void BaseFormatter<Derived, containerMode, Args...>::operator()(Output& out)
+    const {
   // Copy raw string (without format specifiers) to output;
   // not as simple as we'd like, as we still need to translate "}}" to "}"
   // and throw if we see any lone "}"
@@ -217,6 +187,9 @@ void Formatter<containerMode, Args...>::appendOutput(Output& out) const {
       ++p;
     }
   };
+
+  auto p = str_.begin();
+  auto end = str_.end();
 
   int nextArg = 0;
   bool hasDefaultArgIndex = false;
@@ -283,10 +256,11 @@ void Formatter<containerMode, Args...>::appendOutput(Output& out) const {
   }
 }
 
-template <bool containerMode, class... Args>
-void writeTo(FILE* fp, const Formatter<containerMode, Args...>& formatter) {
+template <class Derived, bool containerMode, class... Args>
+void writeTo(FILE* fp,
+             const BaseFormatter<Derived, containerMode, Args...>& formatter) {
   auto writer = [fp] (StringPiece sp) {
-    ssize_t n = fwrite(sp.data(), 1, sp.size(), fp);
+    size_t n = fwrite(sp.data(), 1, sp.size(), fp);
     if (n < sp.size()) {
       throwSystemError("Formatter writeTo", "fwrite failed");
     }
@@ -298,8 +272,19 @@ namespace format_value {
 
 template <class FormatCallback>
 void formatString(StringPiece val, FormatArg& arg, FormatCallback& cb) {
+  if (arg.width != FormatArg::kDefaultWidth && arg.width < 0) {
+    throw BadFormatArg("folly::format: invalid width");
+  }
+  if (arg.precision != FormatArg::kDefaultPrecision && arg.precision < 0) {
+    throw BadFormatArg("folly::format: invalid precision");
+  }
+
+  // XXX: clang should be smart enough to not need the two static_cast<size_t>
+  // uses below given the above checks. If clang ever becomes that smart, we
+  // should remove the otherwise unnecessary warts.
+
   if (arg.precision != FormatArg::kDefaultPrecision &&
-      val.size() > arg.precision) {
+      val.size() > static_cast<size_t>(arg.precision)) {
     val.reset(val.data(), arg.precision);
   }
 
@@ -316,9 +301,10 @@ void formatString(StringPiece val, FormatArg& arg, FormatCallback& cb) {
   };
 
   int padRemaining = 0;
-  if (arg.width != FormatArg::kDefaultWidth && val.size() < arg.width) {
+  if (arg.width != FormatArg::kDefaultWidth &&
+      val.size() < static_cast<size_t>(arg.width)) {
     char fill = arg.fill == FormatArg::kDefaultFill ? ' ' : arg.fill;
-    int padChars = arg.width - val.size();
+    int padChars = static_cast<int> (arg.width - val.size());
     memset(padBuf, fill, std::min(padBufSize, padChars));
 
     switch (arg.align) {
@@ -363,10 +349,14 @@ void formatNumber(StringPiece val, int prefixLen, FormatArg& arg,
   format_value::formatString(val, arg, cb);
 }
 
-template <class FormatCallback, bool containerMode, class... Args>
-void formatFormatter(const Formatter<containerMode, Args...>& formatter,
-                     FormatArg& arg,
-                     FormatCallback& cb) {
+template <class FormatCallback,
+          class Derived,
+          bool containerMode,
+          class... Args>
+void formatFormatter(
+    const BaseFormatter<Derived, containerMode, Args...>& formatter,
+    FormatArg& arg,
+    FormatCallback& cb) {
   if (arg.width == FormatArg::kDefaultWidth &&
       arg.precision == FormatArg::kDefaultPrecision) {
     // nothing to do
@@ -468,27 +458,36 @@ class FormatValue<
     char* valBufBegin = nullptr;
     char* valBufEnd = nullptr;
 
-    // Defer to sprintf
-    auto useSprintf = [&] (const char* format) mutable {
-      valBufBegin = valBuf + 3;  // room for sign and base prefix
-      valBufEnd = valBufBegin + sprintf(valBufBegin, format,
-                                        static_cast<uintmax_t>(uval));
-    };
-
     int prefixLen = 0;
-
     switch (presentation) {
-    case 'n':  // TODO(tudorb): locale awareness?
+    case 'n': {
+      arg.enforce(!arg.basePrefix,
+                  "base prefix not allowed with '", presentation,
+                  "' specifier");
+
+      arg.enforce(!arg.thousandsSeparator,
+                  "cannot use ',' with the '", presentation,
+                  "' specifier");
+
+      valBufBegin = valBuf + 3;  // room for sign and base prefix
+      int len = snprintf(valBufBegin, (valBuf + valBufSize) - valBufBegin,
+                         "%'ju", static_cast<uintmax_t>(uval));
+      // valBufSize should always be big enough, so this should never
+      // happen.
+      assert(len < valBuf + valBufSize - valBufBegin);
+      valBufEnd = valBufBegin + len;
+      break;
+    }
     case 'd':
       arg.enforce(!arg.basePrefix,
                   "base prefix not allowed with '", presentation,
                   "' specifier");
+      valBufBegin = valBuf + 3;  // room for sign and base prefix
+
+      // Use uintToBuffer, faster than sprintf
+      valBufEnd = valBufBegin + uint64ToBufferUnsafe(uval, valBufBegin);
       if (arg.thousandsSeparator) {
-        useSprintf("%'ju");
-      } else {
-        // Use uintToBuffer, faster than sprintf
-        valBufBegin = valBuf + 3;
-        valBufEnd = valBufBegin + uint64ToBufferUnsafe(uval, valBufBegin);
+        detail::insertThousandsGroupingUnsafe(valBufBegin, &valBufEnd);
       }
       break;
     case 'c':
@@ -599,127 +598,15 @@ class FormatValue<double> {
 
   template <class FormatCallback>
   void format(FormatArg& arg, FormatCallback& cb) const {
-    using ::double_conversion::DoubleToStringConverter;
-    using ::double_conversion::StringBuilder;
-
-    arg.validate(FormatArg::Type::FLOAT);
-
-    if (arg.presentation == FormatArg::kDefaultPresentation) {
-      arg.presentation = 'g';
-    }
-
-    const char* infinitySymbol = isupper(arg.presentation) ? "INF" : "inf";
-    const char* nanSymbol = isupper(arg.presentation) ? "NAN" : "nan";
-    char exponentSymbol = isupper(arg.presentation) ? 'E' : 'e';
-
-    if (arg.precision == FormatArg::kDefaultPrecision) {
-      arg.precision = 6;
-    }
-
-    // 2+: for null terminator and optional sign shenanigans.
-    char buf[2 + std::max({
-        (2 + DoubleToStringConverter::kMaxFixedDigitsBeforePoint +
-         DoubleToStringConverter::kMaxFixedDigitsAfterPoint),
-        (8 + DoubleToStringConverter::kMaxExponentialDigits),
-        (7 + DoubleToStringConverter::kMaxPrecisionDigits)})];
-    StringBuilder builder(buf + 1, sizeof(buf) - 1);
-
-    char plusSign;
-    switch (arg.sign) {
-    case FormatArg::Sign::PLUS_OR_MINUS:
-      plusSign = '+';
-      break;
-    case FormatArg::Sign::SPACE_OR_MINUS:
-      plusSign = ' ';
-      break;
-    default:
-      plusSign = '\0';
-      break;
-    };
-
-    double val = val_;
-    switch (arg.presentation) {
-    case '%':
-      val *= 100;
-    case 'f':
-    case 'F':
-      {
-        if (arg.precision >
-            DoubleToStringConverter::kMaxFixedDigitsAfterPoint) {
-          arg.precision = DoubleToStringConverter::kMaxFixedDigitsAfterPoint;
-        }
-        DoubleToStringConverter conv(
-            DoubleToStringConverter::EMIT_POSITIVE_EXPONENT_SIGN,
-            infinitySymbol,
-            nanSymbol,
-            exponentSymbol,
-            -4, arg.precision,
-            0, 0);
-        arg.enforce(conv.ToFixed(val, arg.precision, &builder),
-                    "fixed double conversion failed");
-      }
-      break;
-    case 'e':
-    case 'E':
-      {
-        if (arg.precision > DoubleToStringConverter::kMaxExponentialDigits) {
-          arg.precision = DoubleToStringConverter::kMaxExponentialDigits;
-        }
-
-        DoubleToStringConverter conv(
-            DoubleToStringConverter::EMIT_POSITIVE_EXPONENT_SIGN,
-            infinitySymbol,
-            nanSymbol,
-            exponentSymbol,
-            -4, arg.precision,
-            0, 0);
-        arg.enforce(conv.ToExponential(val, arg.precision, &builder));
-      }
-      break;
-    case 'n':  // should be locale-aware, but isn't
-    case 'g':
-    case 'G':
-      {
-        if (arg.precision < DoubleToStringConverter::kMinPrecisionDigits) {
-          arg.precision = DoubleToStringConverter::kMinPrecisionDigits;
-        } else if (arg.precision >
-                   DoubleToStringConverter::kMaxPrecisionDigits) {
-          arg.precision = DoubleToStringConverter::kMaxPrecisionDigits;
-        }
-        DoubleToStringConverter conv(
-            DoubleToStringConverter::EMIT_POSITIVE_EXPONENT_SIGN,
-            infinitySymbol,
-            nanSymbol,
-            exponentSymbol,
-            -4, arg.precision,
-            0, 0);
-        arg.enforce(conv.ToShortest(val, &builder));
-      }
-      break;
-    default:
-      arg.error("invalid specifier '", arg.presentation, "'");
-    }
-
-    int len = builder.position();
-    builder.Finalize();
-    DCHECK_GT(len, 0);
-
-    // Add '+' or ' ' sign if needed
-    char* p = buf + 1;
-    // anything that's neither negative nor nan
-    int prefixLen = 0;
-    if (plusSign && (*p != '-' && *p != 'n' && *p != 'N')) {
-      *--p = plusSign;
-      ++len;
-      prefixLen = 1;
-    } else if (*p == '-') {
-      prefixLen = 1;
-    }
-
-    format_value::formatNumber(StringPiece(p, len), prefixLen, arg, cb);
+    fbstring piece;
+    int prefixLen;
+    formatHelper(piece, prefixLen, arg);
+    format_value::formatNumber(piece, prefixLen, arg, cb);
   }
 
  private:
+  void formatHelper(fbstring& piece, int& prefixLen, FormatArg& arg) const;
+
   double val_;
 };
 
@@ -890,35 +777,6 @@ class FormatValue<
 
 namespace detail {
 
-// Shortcut, so we don't have to use enable_if everywhere
-struct FormatTraitsBase {
-  typedef void enabled;
-};
-
-// Traits that define enabled, value_type, and at() for anything
-// indexable with integral keys: pointers, arrays, vectors, and maps
-// with integral keys
-template <class T, class Enable=void> struct IndexableTraits;
-
-// Base class for sequences (vectors, deques)
-template <class C>
-struct IndexableTraitsSeq : public FormatTraitsBase {
-  typedef C container_type;
-  typedef typename C::value_type value_type;
-  static const value_type& at(const C& c, int idx) {
-    return c.at(idx);
-  }
-};
-
-// Base class for associative types (maps)
-template <class C>
-struct IndexableTraitsAssoc : public FormatTraitsBase {
-  typedef typename C::value_type::second_type value_type;
-  static const value_type& at(const C& c, int idx) {
-    return c.at(static_cast<typename C::key_type>(idx));
-  }
-};
-
 // std::array
 template <class T, size_t N>
 struct IndexableTraits<std::array<T, N>>
@@ -935,18 +793,6 @@ struct IndexableTraits<std::vector<T, A>>
 template <class T, class A>
 struct IndexableTraits<std::deque<T, A>>
   : public IndexableTraitsSeq<std::deque<T, A>> {
-};
-
-// fbvector
-template <class T, class A>
-struct IndexableTraits<fbvector<T, A>>
-  : public IndexableTraitsSeq<fbvector<T, A>> {
-};
-
-// small_vector
-template <class T, size_t M, class A, class B, class C>
-struct IndexableTraits<small_vector<T, M, A, B, C>>
-  : public IndexableTraitsSeq<small_vector<T, M, A, B, C>> {
 };
 
 // std::map with integral keys
@@ -985,6 +831,28 @@ class FormatValue<
 
  private:
   const T& val_;
+};
+
+template <class Container, class Value>
+class FormatValue<
+  detail::DefaultValueWrapper<Container, Value>,
+  typename detail::IndexableTraits<Container>::enabled> {
+ public:
+  explicit FormatValue(const detail::DefaultValueWrapper<Container, Value>& val)
+    : val_(val) { }
+
+  template <class FormatCallback>
+  void format(FormatArg& arg, FormatCallback& cb) const {
+    FormatValue<typename std::decay<
+      typename detail::IndexableTraits<Container>::value_type>::type>(
+          detail::IndexableTraits<Container>::at(
+              val_.container,
+              arg.splitIntKey(),
+              val_.defaultValue)).format(arg, cb);
+  }
+
+ private:
+  const detail::DefaultValueWrapper<Container, Value>& val_;
 };
 
 namespace detail {
@@ -1028,6 +896,11 @@ template <class T> struct KeyableTraitsAssoc : public FormatTraitsBase {
   static const value_type& at(const T& map, StringPiece key) {
     return map.at(KeyFromStringPiece<key_type>::convert(key));
   }
+  static const value_type& at(const T& map, StringPiece key,
+                              const value_type& dflt) {
+    auto pos = map.find(KeyFromStringPiece<key_type>::convert(key));
+    return pos != map.end() ? pos->second : dflt;
+  }
 };
 
 // Define enabled, key_type, value_type, at() for supported string-keyed
@@ -1070,6 +943,28 @@ class FormatValue<
 
  private:
   const T& val_;
+};
+
+template <class Container, class Value>
+class FormatValue<
+  detail::DefaultValueWrapper<Container, Value>,
+  typename detail::KeyableTraits<Container>::enabled> {
+ public:
+  explicit FormatValue(const detail::DefaultValueWrapper<Container, Value>& val)
+    : val_(val) { }
+
+  template <class FormatCallback>
+  void format(FormatArg& arg, FormatCallback& cb) const {
+    FormatValue<typename std::decay<
+      typename detail::KeyableTraits<Container>::value_type>::type>(
+          detail::KeyableTraits<Container>::at(
+              val_.container,
+              arg.splitKey(),
+              val_.defaultValue)).format(arg, cb);
+  }
+
+ private:
+  const detail::DefaultValueWrapper<Container, Value>& val_;
 };
 
 // Partial specialization of FormatValue for pairs
@@ -1141,9 +1036,13 @@ class FormatValue<std::tuple<Args...>> {
 };
 
 // Partial specialization of FormatValue for nested Formatters
-template <bool containerMode, class... Args>
-class FormatValue<Formatter<containerMode, Args...>, void> {
-  typedef Formatter<containerMode, Args...> FormatterValue;
+template <bool containerMode, class... Args,
+          template <bool, class...> class F>
+class FormatValue<F<containerMode, Args...>,
+                  typename std::enable_if<detail::IsFormatter<
+                      F<containerMode, Args...>>::value>::type> {
+  typedef typename F<containerMode, Args...>::BaseType FormatterValue;
+
  public:
   explicit FormatValue(const FormatterValue& f) : f_(f) { }
 
@@ -1159,11 +1058,12 @@ class FormatValue<Formatter<containerMode, Args...>, void> {
  * Formatter objects can be appended to strings, and therefore they're
  * compatible with folly::toAppend and folly::to.
  */
-template <class Tgt, bool containerMode, class... Args>
-typename std::enable_if<
-   IsSomeString<Tgt>::value>::type
-toAppend(const Formatter<containerMode, Args...>& value, Tgt * result) {
+template <class Tgt, class Derived, bool containerMode, class... Args>
+typename std::enable_if<IsSomeString<Tgt>::value>::type toAppend(
+    const BaseFormatter<Derived, containerMode, Args...>& value, Tgt* result) {
   value.appendTo(*result);
 }
 
 }  // namespace folly
+
+#pragma GCC diagnostic pop

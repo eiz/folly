@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#include "folly/Benchmark.h"
-#include "folly/Traits.h"
+#include <folly/Benchmark.h>
+#include <folly/Traits.h>
 
 #include <gflags/gflags.h>
 #include <gtest/gtest.h>
@@ -110,20 +110,20 @@ TEST(Traits, relational) {
   EXPECT_FALSE((folly::greater_than<uint8_t, 255u, uint8_t>(254u)));
 }
 
-struct CompleteType {};
-struct IncompleteType;
-TEST(Traits, is_complete) {
-  EXPECT_TRUE((folly::is_complete<int>::value));
-  EXPECT_TRUE((folly::is_complete<CompleteType>::value));
-  EXPECT_FALSE((folly::is_complete<IncompleteType>::value));
+struct membership_no {};
+struct membership_yes { using x = void; };
+FOLLY_CREATE_HAS_MEMBER_TYPE_TRAITS(has_member_type_x, x);
+
+TEST(Traits, has_member_type) {
+  EXPECT_FALSE(bool(has_member_type_x<membership_no>::value));
+  EXPECT_TRUE(bool(has_member_type_x<membership_yes>::value));
 }
 
 int main(int argc, char ** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   if (FLAGS_benchmark) {
     folly::runBenchmarks();
   }
   return RUN_ALL_TESTS();
 }
-

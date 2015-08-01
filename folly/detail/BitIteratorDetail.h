@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ class BitReference {
  public:
   BitReference(Ref r, size_t bit) : ref_(r), bit_(bit) { }
 
-  operator bool() const {
+  /* implicit */ operator bool() const {
     return ref_ & (one_ << bit_);
   }
 
@@ -90,4 +90,3 @@ struct BitIteratorBase {
 }  // namespace folly
 
 #endif /* FOLLY_DETAIL_BITITERATORDETAIL_H_ */
-

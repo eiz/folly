@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 
 
-#include "folly/experimental/symbolizer/Elf.h"
+#include <folly/experimental/symbolizer/Elf.h>
 
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -26,8 +26,9 @@
 
 #include <glog/logging.h>
 
-#include "folly/Conv.h"
-#include "folly/Exception.h"
+#include <folly/Conv.h>
+#include <folly/Exception.h>
+#include <folly/ScopeGuard.h>
 
 namespace folly {
 namespace symbolizer {
@@ -50,7 +51,11 @@ ElfFile::ElfFile(const char* name, bool readOnly)
 void ElfFile::open(const char* name, bool readOnly) {
   const char* msg = "";
   int r = openNoThrow(name, readOnly, &msg);
-  folly::checkUnixError(r, msg);
+  if (r == kSystemError) {
+    throwSystemError(msg);
+  } else {
+    CHECK_EQ(r, kSuccess) << msg;
+  }
 }
 
 int ElfFile::openNoThrow(const char* name, bool readOnly, const char** msg)
@@ -59,14 +64,17 @@ int ElfFile::openNoThrow(const char* name, bool readOnly, const char** msg)
   fd_ = ::open(name, readOnly ? O_RDONLY : O_RDWR);
   if (fd_ == -1) {
     if (msg) *msg = "open";
-    return -1;
+    return kSystemError;
   }
-
+  // Always close fd and unmap in case of failure along the way to avoid
+  // check failure above if we leave fd != -1 and the object is recycled
+  // like it is inside SignalSafeElfCache
+  ScopeGuard guard = makeGuard([&]{ reset(); });
   struct stat st;
   int r = fstat(fd_, &st);
   if (r == -1) {
     if (msg) *msg = "fstat";
-    return -1;
+    return kSystemError;
   }
 
   length_ = st.st_size;
@@ -77,17 +85,21 @@ int ElfFile::openNoThrow(const char* name, bool readOnly, const char** msg)
   file_ = static_cast<char*>(mmap(nullptr, length_, prot, MAP_SHARED, fd_, 0));
   if (file_ == MAP_FAILED) {
     if (msg) *msg = "mmap";
-    return -1;
+    return kSystemError;
   }
-  init();
-  return 0;
+  if (!init(msg)) {
+    errno = EINVAL;
+    return kInvalidElfFile;
+  }
+  guard.dismiss();
+  return kSuccess;
 }
 
 ElfFile::~ElfFile() {
-  destroy();
+  reset();
 }
 
-ElfFile::ElfFile(ElfFile&& other)
+ElfFile::ElfFile(ElfFile&& other) noexcept
   : fd_(other.fd_),
     file_(other.file_),
     length_(other.length_),
@@ -100,7 +112,7 @@ ElfFile::ElfFile(ElfFile&& other)
 
 ElfFile& ElfFile::operator=(ElfFile&& other) {
   assert(this != &other);
-  destroy();
+  reset();
 
   fd_ = other.fd_;
   file_ = other.file_;
@@ -115,32 +127,38 @@ ElfFile& ElfFile::operator=(ElfFile&& other) {
   return *this;
 }
 
-void ElfFile::destroy() {
+void ElfFile::reset() {
   if (file_ != MAP_FAILED) {
     munmap(file_, length_);
+    file_ = static_cast<char*>(MAP_FAILED);
   }
 
   if (fd_ != -1) {
     close(fd_);
+    fd_ = -1;
   }
 }
 
-void ElfFile::init() {
+bool ElfFile::init(const char** msg) {
   auto& elfHeader = this->elfHeader();
 
   // Validate ELF magic numbers
-  FOLLY_SAFE_CHECK(elfHeader.e_ident[EI_MAG0] == ELFMAG0 &&
-                   elfHeader.e_ident[EI_MAG1] == ELFMAG1 &&
-                   elfHeader.e_ident[EI_MAG2] == ELFMAG2 &&
-                   elfHeader.e_ident[EI_MAG3] == ELFMAG3,
-                   "invalid ELF magic");
+  if (!(elfHeader.e_ident[EI_MAG0] == ELFMAG0 &&
+        elfHeader.e_ident[EI_MAG1] == ELFMAG1 &&
+        elfHeader.e_ident[EI_MAG2] == ELFMAG2 &&
+        elfHeader.e_ident[EI_MAG3] == ELFMAG3)) {
+    if (msg) *msg = "invalid ELF magic";
+    return false;
+  }
 
   // Validate ELF class (32/64 bits)
 #define EXPECTED_CLASS P1(ELFCLASS, __ELF_NATIVE_CLASS)
 #define P1(a, b) P2(a, b)
 #define P2(a, b) a ## b
-  FOLLY_SAFE_CHECK(elfHeader.e_ident[EI_CLASS] == EXPECTED_CLASS,
-                   "invalid ELF class");
+  if (elfHeader.e_ident[EI_CLASS] != EXPECTED_CLASS) {
+    if (msg) *msg = "invalid ELF class";
+    return false;
+  }
 #undef P1
 #undef P2
 #undef EXPECTED_CLASS
@@ -153,24 +171,38 @@ void ElfFile::init() {
 #else
 # error Unsupported byte order
 #endif
-  FOLLY_SAFE_CHECK(elfHeader.e_ident[EI_DATA] == EXPECTED_ENCODING,
-                   "invalid ELF encoding");
+  if (elfHeader.e_ident[EI_DATA] != EXPECTED_ENCODING) {
+    if (msg) *msg = "invalid ELF encoding";
+    return false;
+  }
 #undef EXPECTED_ENCODING
 
   // Validate ELF version (1)
-  FOLLY_SAFE_CHECK(elfHeader.e_ident[EI_VERSION] == EV_CURRENT &&
-                   elfHeader.e_version == EV_CURRENT,
-                   "invalid ELF version");
+  if (elfHeader.e_ident[EI_VERSION] != EV_CURRENT ||
+      elfHeader.e_version != EV_CURRENT) {
+    if (msg) *msg = "invalid ELF version";
+    return false;
+  }
 
   // We only support executable and shared object files
-  FOLLY_SAFE_CHECK(elfHeader.e_type == ET_EXEC || elfHeader.e_type == ET_DYN,
-                   "invalid ELF file type");
+  if (elfHeader.e_type != ET_EXEC && elfHeader.e_type != ET_DYN) {
+    if (msg) *msg = "invalid ELF file type";
+    return false;
+  }
 
-  FOLLY_SAFE_CHECK(elfHeader.e_phnum != 0, "no program header!");
-  FOLLY_SAFE_CHECK(elfHeader.e_phentsize == sizeof(ElfW(Phdr)),
-                   "invalid program header entry size");
-  FOLLY_SAFE_CHECK(elfHeader.e_shentsize == sizeof(ElfW(Shdr)),
-                   "invalid section header entry size");
+  if (elfHeader.e_phnum == 0) {
+    if (msg) *msg = "no program header!";
+    return false;
+  }
+
+  if (elfHeader.e_phentsize != sizeof(ElfW(Phdr))) {
+    if (msg) *msg = "invalid program header entry size";
+    return false;
+  }
+
+  if (elfHeader.e_shentsize != sizeof(ElfW(Shdr))) {
+    if (msg) *msg = "invalid section header entry size";
+  }
 
   const ElfW(Phdr)* programHeader = &at<ElfW(Phdr)>(elfHeader.e_phoff);
   bool foundBase = false;
@@ -184,7 +216,12 @@ void ElfFile::init() {
     }
   }
 
-  FOLLY_SAFE_CHECK(foundBase, "could not find base address");
+  if (!foundBase) {
+    if (msg) *msg =  "could not find base address";
+    return false;
+  }
+
+  return true;
 }
 
 const ElfW(Shdr)* ElfFile::getSectionByIndex(size_t idx) const {
@@ -344,4 +381,3 @@ const char* ElfFile::getSymbolName(Symbol symbol) const {
 
 }  // namespace symbolizer
 }  // namespace folly
-

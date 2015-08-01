@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,15 @@
 
 #define __STDC_LIMIT_MACROS
 
-#include "folly/io/IOBuf.h"
+#include <folly/io/IOBuf.h>
 
-#include "folly/Conv.h"
-#include "folly/Likely.h"
-#include "folly/Malloc.h"
-#include "folly/Memory.h"
-#include "folly/ScopeGuard.h"
+#include <folly/Conv.h>
+#include <folly/Likely.h>
+#include <folly/Malloc.h>
+#include <folly/Memory.h>
+#include <folly/ScopeGuard.h>
+#include <folly/SpookyHashV2.h>
+#include <folly/io/Cursor.h>
 
 #include <stdexcept>
 #include <assert.h>
@@ -334,6 +336,10 @@ IOBuf::IOBuf(IOBuf&& other) noexcept {
   *this = std::move(other);
 }
 
+IOBuf::IOBuf(const IOBuf& other) {
+  other.cloneInto(*this);
+}
+
 IOBuf::IOBuf(InternalConstructor,
              uintptr_t flagsAndSharedInfo,
              uint8_t* buf,
@@ -365,6 +371,10 @@ IOBuf::~IOBuf() {
 }
 
 IOBuf& IOBuf::operator=(IOBuf&& other) noexcept {
+  if (this == &other) {
+    return *this;
+  }
+
   // If we are part of a chain, delete the rest of the chain.
   while (next_ != this) {
     // Since unlink() returns unique_ptr() and we don't store it,
@@ -404,6 +414,13 @@ IOBuf& IOBuf::operator=(IOBuf&& other) noexcept {
   DCHECK_EQ(other.prev_, &other);
   DCHECK_EQ(other.next_, &other);
 
+  return *this;
+}
+
+IOBuf& IOBuf::operator=(const IOBuf& other) {
+  if (this != &other) {
+    *this = IOBuf(other);
+  }
   return *this;
 }
 
@@ -535,6 +552,19 @@ void IOBuf::unshareChained() {
   coalesceSlow();
 }
 
+void IOBuf::makeManagedChained() {
+  assert(isChained());
+
+  IOBuf* current = this;
+  while (true) {
+    current->makeManagedOne();
+    current = current->next_;
+    if (current == this) {
+      break;
+    }
+  }
+}
+
 void IOBuf::coalesceSlow() {
   // coalesceSlow() should only be called if we are part of a chain of multiple
   // IOBufs.  The caller should have already verified this.
@@ -584,9 +614,6 @@ void IOBuf::coalesceAndReallocate(size_t newHeadroom,
                                   IOBuf* end,
                                   size_t newTailroom) {
   uint64_t newCapacity = newLength + newHeadroom + newTailroom;
-  if (newCapacity > UINT32_MAX) {
-    throw std::overflow_error("IOBuf chain too large to coalesce");
-  }
 
   // Allocate space for the coalesced buffer.
   // We always convert to an external buffer, even if we happened to be an
@@ -695,20 +722,21 @@ void IOBuf::reserveSlow(uint64_t minHeadroom, uint64_t minTailroom) {
     return;
   }
 
-  size_t newAllocatedCapacity = goodExtBufferSize(newCapacity);
+  size_t newAllocatedCapacity = 0;
   uint8_t* newBuffer = nullptr;
   uint64_t newHeadroom = 0;
   uint64_t oldHeadroom = headroom();
 
   // If we have a buffer allocated with malloc and we just need more tailroom,
-  // try to use realloc()/rallocm() to grow the buffer in place.
+  // try to use realloc()/xallocx() to grow the buffer in place.
   SharedInfo* info = sharedInfo();
   if (info && (info->freeFn == nullptr) && length_ != 0 &&
       oldHeadroom >= minHeadroom) {
+    size_t headSlack = oldHeadroom - minHeadroom;
+    newAllocatedCapacity = goodExtBufferSize(newCapacity + headSlack);
     if (usingJEMalloc()) {
-      size_t headSlack = oldHeadroom - minHeadroom;
       // We assume that tailroom is more useful and more important than
-      // headroom (not least because realloc / rallocm allow us to grow the
+      // headroom (not least because realloc / xallocx allow us to grow the
       // buffer at the tail, but not at the head)  So, if we have more headroom
       // than we need, we consider that "wasted".  We arbitrarily define "too
       // much" headroom to be 25% of the capacity.
@@ -716,23 +744,11 @@ void IOBuf::reserveSlow(uint64_t minHeadroom, uint64_t minTailroom) {
         size_t allocatedCapacity = capacity() + sizeof(SharedInfo);
         void* p = buf_;
         if (allocatedCapacity >= jemallocMinInPlaceExpandable) {
-          // rallocm can write to its 2nd arg even if it returns
-          // ALLOCM_ERR_NOT_MOVED. So, we pass a temporary to its 2nd arg and
-          // update newAllocatedCapacity only on success.
-          size_t allocatedSize;
-          int r = rallocm(&p, &allocatedSize, newAllocatedCapacity,
-                          0, ALLOCM_NO_MOVE);
-          if (r == ALLOCM_SUCCESS) {
+          if (xallocx(p, newAllocatedCapacity, 0, 0) == newAllocatedCapacity) {
             newBuffer = static_cast<uint8_t*>(p);
             newHeadroom = oldHeadroom;
-            newAllocatedCapacity = allocatedSize;
-          } else if (r == ALLOCM_ERR_OOM) {
-            // shouldn't happen as we don't actually allocate new memory
-            // (due to ALLOCM_NO_MOVE)
-            throw std::bad_alloc();
           }
-          // if ALLOCM_ERR_NOT_MOVED, do nothing, fall back to
-          // malloc/memcpy/free
+          // if xallocx failed, do nothing, fall back to malloc/memcpy/free
         }
       }
     } else {  // Not using jemalloc
@@ -751,6 +767,7 @@ void IOBuf::reserveSlow(uint64_t minHeadroom, uint64_t minTailroom) {
   // None of the previous reallocation strategies worked (or we're using
   // an internal buffer).  malloc/copy/free.
   if (newBuffer == nullptr) {
+    newAllocatedCapacity = goodExtBufferSize(newCapacity);
     void* p = malloc(newAllocatedCapacity);
     if (UNLIKELY(p == nullptr)) {
       throw std::bad_alloc();
@@ -878,15 +895,76 @@ IOBuf::Iterator IOBuf::cend() const {
 folly::fbvector<struct iovec> IOBuf::getIov() const {
   folly::fbvector<struct iovec> iov;
   iov.reserve(countChainElements());
+  appendToIov(&iov);
+  return iov;
+}
+
+void IOBuf::appendToIov(folly::fbvector<struct iovec>* iov) const {
   IOBuf const* p = this;
   do {
     // some code can get confused by empty iovs, so skip them
     if (p->length() > 0) {
-      iov.push_back({(void*)p->data(), p->length()});
+      iov->push_back({(void*)p->data(), folly::to<size_t>(p->length())});
     }
     p = p->next();
   } while (p != this);
-  return iov;
+}
+
+size_t IOBuf::fillIov(struct iovec* iov, size_t len) const {
+  IOBuf const* p = this;
+  size_t i = 0;
+  while (i < len) {
+    // some code can get confused by empty iovs, so skip them
+    if (p->length() > 0) {
+      iov[i].iov_base = const_cast<uint8_t*>(p->data());
+      iov[i].iov_len = p->length();
+      i++;
+    }
+    p = p->next();
+    if (p == this) {
+      return i;
+    }
+  }
+  return 0;
+}
+
+size_t IOBufHash::operator()(const IOBuf& buf) const {
+  folly::hash::SpookyHashV2 hasher;
+  hasher.Init(0, 0);
+  io::Cursor cursor(&buf);
+  for (;;) {
+    auto p = cursor.peek();
+    if (p.second == 0) {
+      break;
+    }
+    hasher.Update(p.first, p.second);
+    cursor.skip(p.second);
+  }
+  uint64_t h1;
+  uint64_t h2;
+  hasher.Final(&h1, &h2);
+  return h1;
+}
+
+bool IOBufEqual::operator()(const IOBuf& a, const IOBuf& b) const {
+  io::Cursor ca(&a);
+  io::Cursor cb(&b);
+  for (;;) {
+    auto pa = ca.peek();
+    auto pb = cb.peek();
+    if (pa.second == 0 && pb.second == 0) {
+      return true;
+    } else if (pa.second == 0 || pb.second == 0) {
+      return false;
+    }
+    size_t n = std::min(pa.second, pb.second);
+    DCHECK_GT(n, 0);
+    if (memcmp(pa.first, pb.first, n)) {
+      return false;
+    }
+    ca.skip(n);
+    cb.skip(n);
+  }
 }
 
 } // folly

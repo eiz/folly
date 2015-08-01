@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/Random.h"
+#include <folly/Random.h>
 
 #include <atomic>
 #include <unistd.h>
@@ -22,60 +22,95 @@
 #include <random>
 #include <array>
 
-#if __GNUC_PREREQ(4, 8)
-#include <ext/random>
-#define USE_SIMD_PRNG
-#endif
+#include <glog/logging.h>
+#include <folly/File.h>
+#include <folly/FileUtil.h>
 
 namespace folly {
 
 namespace {
-std::atomic<uint32_t> seedInput(0);
+
+void readRandomDevice(void* data, size_t size) {
+  // Keep the random device open for the duration of the program.
+  static int randomFd = ::open("/dev/urandom", O_RDONLY);
+  PCHECK(randomFd >= 0);
+  auto bytesRead = readFull(randomFd, data, size);
+  PCHECK(bytesRead >= 0 && size_t(bytesRead) == size);
 }
 
-uint32_t randomNumberSeed() {
-  struct timeval tv;
-  gettimeofday(&tv, nullptr);
-  const uint32_t kPrime0 = 51551;
-  const uint32_t kPrime1 = 61631;
-  const uint32_t kPrime2 = 64997;
-  const uint32_t kPrime3 = 111857;
-  return kPrime0 * (seedInput++)
-       + kPrime1 * static_cast<uint32_t>(getpid())
-       + kPrime2 * static_cast<uint32_t>(tv.tv_sec)
-       + kPrime3 * static_cast<uint32_t>(tv.tv_usec);
-}
+class BufferedRandomDevice {
+ public:
+  static constexpr size_t kDefaultBufferSize = 128;
 
+  explicit BufferedRandomDevice(size_t bufferSize = kDefaultBufferSize);
 
-folly::ThreadLocalPtr<ThreadLocalPRNG::LocalInstancePRNG>
-ThreadLocalPRNG::localInstance;
-
-class ThreadLocalPRNG::LocalInstancePRNG {
-#ifdef USE_SIMD_PRNG
-  typedef  __gnu_cxx::sfmt19937 RNG;
-#else
-  typedef std::mt19937 RNG;
-#endif
-
-  static RNG makeRng() {
-    std::array<int, RNG::state_size> seed_data;
-    std::random_device r;
-    std::generate_n(seed_data.data(), seed_data.size(), std::ref(r));
-    std::seed_seq seq(std::begin(seed_data), std::end(seed_data));
-    return RNG(seq);
+  void get(void* data, size_t size) {
+    if (LIKELY(size <= remaining())) {
+      memcpy(data, ptr_, size);
+      ptr_ += size;
+    } else {
+      getSlow(static_cast<unsigned char*>(data), size);
+    }
   }
 
- public:
-  LocalInstancePRNG() : rng(std::move(makeRng())) {}
+ private:
+  void getSlow(unsigned char* data, size_t size);
 
-  RNG rng;
+  inline size_t remaining() const {
+    return buffer_.get() + bufferSize_ - ptr_;
+  }
+
+  const size_t bufferSize_;
+  std::unique_ptr<unsigned char[]> buffer_;
+  unsigned char* ptr_;
 };
 
-ThreadLocalPRNG::LocalInstancePRNG* ThreadLocalPRNG::initLocal() {
-  auto ret = new LocalInstancePRNG;
-  localInstance.reset(ret);
-  return ret;
+BufferedRandomDevice::BufferedRandomDevice(size_t bufferSize)
+  : bufferSize_(bufferSize),
+    buffer_(new unsigned char[bufferSize]),
+    ptr_(buffer_.get() + bufferSize) {  // refill on first use
 }
+
+void BufferedRandomDevice::getSlow(unsigned char* data, size_t size) {
+  DCHECK_GT(size, remaining());
+  if (size >= bufferSize_) {
+    // Just read directly.
+    readRandomDevice(data, size);
+    return;
+  }
+
+  size_t copied = remaining();
+  memcpy(data, ptr_, copied);
+  data += copied;
+  size -= copied;
+
+  // refill
+  readRandomDevice(buffer_.get(), bufferSize_);
+  ptr_ = buffer_.get();
+
+  memcpy(data, ptr_, size);
+  ptr_ += size;
+}
+
+
+}  // namespace
+
+void Random::secureRandom(void* data, size_t size) {
+  static ThreadLocal<BufferedRandomDevice> bufferedRandomDevice;
+  bufferedRandomDevice->get(data, size);
+}
+
+ThreadLocalPRNG::ThreadLocalPRNG() {
+  static folly::ThreadLocal<ThreadLocalPRNG::LocalInstancePRNG> localInstance;
+  local_ = localInstance.get();
+}
+
+class ThreadLocalPRNG::LocalInstancePRNG {
+ public:
+  LocalInstancePRNG() : rng(Random::create()) { }
+
+  Random::DefaultGenerator rng;
+};
 
 uint32_t ThreadLocalPRNG::getImpl(LocalInstancePRNG* local) {
   return local->rng();

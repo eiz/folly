@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -203,7 +203,7 @@ class MergeTuples {
 
 }  // namespace detail
 
-static const detail::Map<detail::MergeTuples> tuple_flatten;
+static const detail::Map<detail::MergeTuples> tuple_flatten{};
 
 // TODO(mcurtiss): support zip() for N>1 operands. Because of variadic problems,
 // this might not be easily possible until gcc4.8 is available.

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,24 +18,27 @@
 #define FOLLY_BASE_STRING_H_
 
 #include <exception>
+#include <stdarg.h>
 #include <string>
 #include <boost/type_traits.hpp>
 
+#ifdef FOLLY_HAVE_DEPRECATED_ASSOC
 #ifdef _GLIBCXX_SYMVER
 #include <ext/hash_set>
 #include <ext/hash_map>
+#endif
 #endif
 
 #include <unordered_set>
 #include <unordered_map>
 
-#include "folly/Conv.h"
-#include "folly/Demangle.h"
-#include "folly/FBString.h"
-#include "folly/FBVector.h"
-#include "folly/Portability.h"
-#include "folly/Range.h"
-#include "folly/ScopeGuard.h"
+#include <folly/Conv.h>
+#include <folly/Demangle.h>
+#include <folly/FBString.h>
+#include <folly/FBVector.h>
+#include <folly/Portability.h>
+#include <folly/Range.h>
+#include <folly/ScopeGuard.h>
 
 // Compatibility function, to make sure toStdString(s) can be called
 // to convert a std::string or fbstring variable s into type std::string
@@ -173,16 +176,26 @@ String uriUnescape(StringPiece str, UriEscapeMode mode = UriEscapeMode::ALL) {
  * resulting string, and the second appends the produced characters to
  * the specified string and returns a reference to it.
  */
-std::string stringPrintf(const char* format, ...)
-  __attribute__ ((format (printf, 1, 2)));
+std::string stringPrintf(FOLLY_PRINTF_FORMAT const char* format, ...)
+  FOLLY_PRINTF_FORMAT_ATTR(1, 2);
 
-/** Similar to stringPrintf, with different signiture.
-  */
-void stringPrintf(std::string* out, const char* fmt, ...)
-  __attribute__ ((format (printf, 2, 3)));
+/* Similar to stringPrintf, with different signature. */
+void stringPrintf(std::string* out, FOLLY_PRINTF_FORMAT const char* fmt, ...)
+  FOLLY_PRINTF_FORMAT_ATTR(2, 3);
 
-std::string& stringAppendf(std::string* output, const char* format, ...)
-  __attribute__ ((format (printf, 2, 3)));
+std::string& stringAppendf(std::string* output,
+                          FOLLY_PRINTF_FORMAT const char* format, ...)
+  FOLLY_PRINTF_FORMAT_ATTR(2, 3);
+
+/**
+ * Similar to stringPrintf, but accepts a va_list argument.
+ *
+ * As with vsnprintf() itself, the value of ap is undefined after the call.
+ * These functions do not call va_end() on ap.
+ */
+std::string stringVPrintf(const char* format, va_list ap);
+void stringVPrintf(std::string* out, const char* format, va_list ap);
+std::string& stringVAppendf(std::string* out, const char* format, va_list ap);
 
 /**
  * Backslashify a string, that is, replace non-printable characters
@@ -347,12 +360,21 @@ std::string hexDump(const void* ptr, size_t size);
 fbstring errnoStr(int err);
 
 /**
- * Debug string for an exception: include type and what().
+ * Debug string for an exception: include type and what(), if
+ * defined.
  */
 inline fbstring exceptionStr(const std::exception& e) {
+#ifdef FOLLY_HAS_RTTI
   return folly::to<fbstring>(demangle(typeid(e)), ": ", e.what());
+#else
+  return folly::to<fbstring>("Exception (no RTTI available): ", e.what());
+#endif
 }
 
+// Empirically, this indicates if the runtime supports
+// std::exception_ptr, as not all (arm, for instance) do.
+#if defined(__GNUC__) && defined(__GCC_ATOMIC_INT_LOCK_FREE) && \
+  __GCC_ATOMIC_INT_LOCK_FREE > 1
 inline fbstring exceptionStr(std::exception_ptr ep) {
   try {
     std::rethrow_exception(ep);
@@ -361,6 +383,19 @@ inline fbstring exceptionStr(std::exception_ptr ep) {
   } catch (...) {
     return "<unknown exception>";
   }
+}
+#endif
+
+template<typename E>
+auto exceptionStr(const E& e)
+  -> typename std::enable_if<!std::is_base_of<std::exception, E>::value,
+                             fbstring>::type
+{
+#ifdef FOLLY_HAS_RTTI
+  return folly::to<fbstring>(demangle(typeid(e)));
+#else
+  return "Exception (no RTTI available)";
+#endif
 }
 
 /*
@@ -415,7 +450,9 @@ void splitTo(const Delim& delimiter,
  * Split a string into a fixed number of string pieces and/or numeric types
  * by delimiter. Any numeric type that folly::to<> can convert to from a
  * string piece is supported as a target. Returns 'true' if the fields were
- * all successfully populated.
+ * all successfully populated.  Returns 'false' if there were too few fields
+ * in the input, or too many fields if exact=true.  Casting exceptions will
+ * not be caught.
  *
  * Examples:
  *
@@ -446,7 +483,8 @@ void splitTo(const Delim& delimiter,
 template <class T>
 using IsSplitTargetType = std::integral_constant<bool,
   std::is_arithmetic<T>::value ||
-  std::is_same<T, StringPiece>::value>;
+  std::is_same<T, StringPiece>::value ||
+  IsSomeString<T>::value>;
 
 template<bool exact = true,
          class Delim,
@@ -501,35 +539,60 @@ std::string join(const Delim& delimiter,
   return output;
 }
 
+template <class Delim,
+          class Iterator,
+          typename std::enable_if<std::is_same<
+              typename std::iterator_traits<Iterator>::iterator_category,
+              std::random_access_iterator_tag>::value>::type* = nullptr>
+std::string join(const Delim& delimiter, Iterator begin, Iterator end) {
+  std::string output;
+  join(delimiter, begin, end, output);
+  return output;
+}
+
+/**
+ * Returns a subpiece with all whitespace removed from the front of @sp.
+ * Whitespace means any of [' ', '\n', '\r', '\t'].
+ */
+StringPiece ltrimWhitespace(StringPiece sp);
+
+/**
+ * Returns a subpiece with all whitespace removed from the back of @sp.
+ * Whitespace means any of [' ', '\n', '\r', '\t'].
+ */
+StringPiece rtrimWhitespace(StringPiece sp);
+
+/**
+ * Returns a subpiece with all whitespace removed from the back and front of @sp.
+ * Whitespace means any of [' ', '\n', '\r', '\t'].
+ */
+inline StringPiece trimWhitespace(StringPiece sp) {
+  return ltrimWhitespace(rtrimWhitespace(sp));
+}
+
+/**
+ * Returns a subpiece with all whitespace removed from the front of @sp.
+ * Whitespace means any of [' ', '\n', '\r', '\t'].
+ * DEPRECATED: @see ltrimWhitespace @see rtrimWhitespace
+ */
+inline StringPiece skipWhitespace(StringPiece sp) {
+  return ltrimWhitespace(sp);
+}
+
+/**
+ * Fast, in-place lowercasing of ASCII alphabetic characters in strings.
+ * Leaves all other characters unchanged, including those with the 0x80
+ * bit set.
+ * @param str String to convert
+ * @param len Length of str, in bytes
+ */
+void toLowerAscii(char* str, size_t length);
+
+inline void toLowerAscii(MutableStringPiece str) {
+  toLowerAscii(str.begin(), str.size());
+}
+
 } // namespace folly
-
-// Hash functions to make std::string usable with e.g. hash_map
-//
-// Handle interaction with different C++ standard libraries, which
-// expect these types to be in different namespaces.
-namespace std {
-
-template <class C>
-struct hash<std::basic_string<C> > : private hash<const C*> {
-  size_t operator()(const std::basic_string<C> & s) const {
-    return hash<const C*>::operator()(s.c_str());
-  }
-};
-
-}
-
-#if defined(_GLIBCXX_SYMVER) && !defined(__BIONIC__)
-namespace __gnu_cxx {
-
-template <class C>
-struct hash<std::basic_string<C> > : private hash<const C*> {
-  size_t operator()(const std::basic_string<C> & s) const {
-    return hash<const C*>::operator()(s.c_str());
-  }
-};
-
-}
-#endif
 
 // Hook into boost's type traits
 namespace boost {
@@ -539,6 +602,6 @@ struct has_nothrow_constructor<folly::basic_fbstring<T> > : true_type {
 };
 } // namespace boost
 
-#include "folly/String-inl.h"
+#include <folly/String-inl.h>
 
 #endif

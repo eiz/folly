@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
-#include "folly/io/RecordIO.h"
+#include <folly/io/RecordIO.h>
 
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "folly/Exception.h"
-#include "folly/FileUtil.h"
-#include "folly/Memory.h"
-#include "folly/Portability.h"
-#include "folly/ScopeGuard.h"
-#include "folly/String.h"
+#include <folly/Exception.h>
+#include <folly/FileUtil.h>
+#include <folly/Memory.h>
+#include <folly/Portability.h>
+#include <folly/ScopeGuard.h>
+#include <folly/String.h>
 
 namespace folly {
 
@@ -78,7 +78,8 @@ RecordIOReader::Iterator::Iterator(ByteRange range, uint32_t fileId, off_t pos)
   : range_(range),
     fileId_(fileId),
     recordAndPos_(ByteRange(), 0) {
-  if (pos >= range_.size()) {
+  if (size_t(pos) >= range_.size()) {
+    // Note that this branch can execute if pos is negative as well.
     recordAndPos_.second = off_t(-1);
     range_.clear();
   } else {

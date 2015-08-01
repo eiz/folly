@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-#include "folly/Benchmark.h"
-#include "folly/Conv.h"
-#include "folly/Foreach.h"
+#include <folly/Benchmark.h>
+#include <folly/Conv.h>
+#include <folly/Foreach.h>
 #include <boost/lexical_cast.hpp>
 #include <gtest/gtest.h>
 #include <limits>
@@ -33,6 +33,90 @@ static int32_t s32;
 static uint32_t u32;
 static int64_t s64;
 static uint64_t u64;
+
+TEST(Conv, digits10Minimal) {
+  // Not much of a test (and it's included in the test below anyway).
+  // I just want to inspect the generated assembly for this function.
+  folly::doNotOptimizeAway(digits10(random() * random()));
+}
+
+TEST(Conv, digits10) {
+  char buffer[100];
+  uint64_t power;
+
+  // first, some basic sniff tests
+  EXPECT_EQ( 1, digits10(0));
+  EXPECT_EQ( 1, digits10(1));
+  EXPECT_EQ( 1, digits10(9));
+  EXPECT_EQ( 2, digits10(10));
+  EXPECT_EQ( 2, digits10(99));
+  EXPECT_EQ( 3, digits10(100));
+  EXPECT_EQ( 3, digits10(999));
+  EXPECT_EQ( 4, digits10(1000));
+  EXPECT_EQ( 4, digits10(9999));
+  EXPECT_EQ(20, digits10(18446744073709551615ULL));
+
+  // try the first X nonnegatives.
+  // Covers some more cases of 2^p, 10^p
+  for (uint64_t i = 0; i < 100000; i++) {
+    snprintf(buffer, sizeof(buffer), "%lu", i);
+    EXPECT_EQ(strlen(buffer), digits10(i));
+  }
+
+  // try powers of 2
+  power = 1;
+  for (int p = 0; p < 64; p++) {
+    snprintf(buffer, sizeof(buffer), "%lu", power);
+    EXPECT_EQ(strlen(buffer), digits10(power));
+    snprintf(buffer, sizeof(buffer), "%lu", power - 1);
+    EXPECT_EQ(strlen(buffer), digits10(power - 1));
+    snprintf(buffer, sizeof(buffer), "%lu", power + 1);
+    EXPECT_EQ(strlen(buffer), digits10(power + 1));
+    power *= 2;
+  }
+
+  // try powers of 10
+  power = 1;
+  for (int p = 0; p < 20; p++) {
+    snprintf(buffer, sizeof(buffer), "%lu", power);
+    EXPECT_EQ(strlen(buffer), digits10(power));
+    snprintf(buffer, sizeof(buffer), "%lu", power - 1);
+    EXPECT_EQ(strlen(buffer), digits10(power - 1));
+    snprintf(buffer, sizeof(buffer), "%lu", power + 1);
+    EXPECT_EQ(strlen(buffer), digits10(power + 1));
+    power *= 10;
+  }
+}
+
+// Test to<T>(T)
+TEST(Conv, Type2Type) {
+  int intV = 42;
+  EXPECT_EQ(to<int>(intV), 42);
+
+  float floatV = 4.2;
+  EXPECT_EQ(to<float>(floatV), 4.2f);
+
+  double doubleV = 0.42;
+  EXPECT_EQ(to<double>(doubleV), 0.42);
+
+  std::string stringV = "StdString";
+  EXPECT_EQ(to<std::string>(stringV), "StdString");
+
+  folly::fbstring fbStrV = "FBString";
+  EXPECT_EQ(to<folly::fbstring>(fbStrV), "FBString");
+
+  folly::StringPiece spV("StringPiece");
+  EXPECT_EQ(to<folly::StringPiece>(spV), "StringPiece");
+
+  // Rvalues
+  EXPECT_EQ(to<int>(42), 42);
+  EXPECT_EQ(to<float>(4.2f), 4.2f);
+  EXPECT_EQ(to<double>(.42), .42);
+  EXPECT_EQ(to<std::string>(std::string("Hello")), "Hello");
+  EXPECT_EQ(to<folly::fbstring>(folly::fbstring("hello")), "hello");
+  EXPECT_EQ(to<folly::StringPiece>(folly::StringPiece("Forty Two")),
+            "Forty Two");
+}
 
 TEST(Conv, Integral2Integral) {
   // Same size, different signs
@@ -390,6 +474,14 @@ TEST(Conv, BadStringToIntegral) {
 }
 
 template <class String>
+void testIdenticalTo() {
+  String s("Yukkuri shiteitte ne!!!");
+
+  String result = to<String>(s);
+  EXPECT_EQ(result, s);
+}
+
+template <class String>
 void testVariadicTo() {
   String s;
   toAppend(&s);
@@ -401,6 +493,17 @@ void testVariadicTo() {
 
   s = to<String>("Lorem ipsum ", nullptr, 1234, " dolor amet ", 567.89, '.');
   EXPECT_EQ(s, "Lorem ipsum 1234 dolor amet 567.89.");
+}
+
+template <class String>
+void testIdenticalToDelim() {
+  String s("Yukkuri shiteitte ne!!!");
+
+  String charDelim = toDelim<String>('$', s);
+  EXPECT_EQ(charDelim, s);
+
+  String strDelim = toDelim<String>(String(">_<"), s);
+  EXPECT_EQ(strDelim, s);
 }
 
 template <class String>
@@ -427,11 +530,15 @@ TEST(Conv, NullString) {
 }
 
 TEST(Conv, VariadicTo) {
+  testIdenticalTo<string>();
+  testIdenticalTo<fbstring>();
   testVariadicTo<string>();
   testVariadicTo<fbstring>();
 }
 
 TEST(Conv, VariadicToDelim) {
+  testIdenticalToDelim<string>();
+  testIdenticalToDelim<fbstring>();
   testVariadicToDelim<string>();
   testVariadicToDelim<fbstring>();
 }
@@ -725,6 +832,22 @@ TEST(Conv, NewUint64ToString) {
 #undef THE_GREAT_EXPECTATIONS
 }
 
+TEST(Conv, allocate_size) {
+  std::string str1 = "meh meh meh";
+  std::string str2 = "zdech zdech zdech";
+
+  auto res1 = folly::to<std::string>(str1, ".", str2);
+  EXPECT_EQ(res1, str1 + "." + str2);
+
+  std::string res2; //empty
+  toAppendFit(str1, str2, 1, &res2);
+  EXPECT_EQ(res2, str1 + str2 + "1");
+
+  std::string res3;
+  toAppendDelimFit(",", str1, str2, &res3);
+  EXPECT_EQ(res3, str1 + "," + str2);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Benchmarks for ASCII to int conversion
 ////////////////////////////////////////////////////////////////////////////////
@@ -911,6 +1034,64 @@ void u2aAppendFollyBM(unsigned int n, uint64_t value) {
   }
 }
 
+template <class String>
+struct StringIdenticalToBM {
+  StringIdenticalToBM() {}
+  void operator()(unsigned int n, size_t len) const {
+    String s;
+    BENCHMARK_SUSPEND { s.append(len, '0'); }
+    FOR_EACH_RANGE (i, 0, n) {
+      String result = to<String>(s);
+      doNotOptimizeAway(result.size());
+    }
+  }
+};
+
+template <class String>
+struct StringVariadicToBM {
+  StringVariadicToBM() {}
+  void operator()(unsigned int n, size_t len) const {
+    String s;
+    BENCHMARK_SUSPEND { s.append(len, '0'); }
+    FOR_EACH_RANGE (i, 0, n) {
+      String result = to<String>(s, nullptr);
+      doNotOptimizeAway(result.size());
+    }
+  }
+};
+
+static size_t bigInt = 11424545345345;
+static size_t smallInt = 104;
+static char someString[] = "this is some nice string";
+static char otherString[] = "this is a long string, so it's not so nice";
+static char reallyShort[] = "meh";
+static std::string stdString = "std::strings are very nice";
+static float fValue = 1.2355;
+static double dValue = 345345345.435;
+
+BENCHMARK(preallocateTestNoFloat, n) {
+  for (size_t i = 0; i < n; ++i) {
+    auto val1 = to<std::string>(bigInt, someString, stdString, otherString);
+    auto val3 = to<std::string>(reallyShort, smallInt);
+    auto val2 = to<std::string>(bigInt, stdString);
+    auto val4 = to<std::string>(bigInt, stdString, dValue, otherString);
+    auto val5 = to<std::string>(bigInt, someString, reallyShort);
+  }
+}
+
+BENCHMARK(preallocateTestFloat, n) {
+  for (size_t i = 0; i < n; ++i) {
+    auto val1 = to<std::string>(stdString, ',', fValue, dValue);
+    auto val2 = to<std::string>(stdString, ',', dValue);
+  }
+}
+BENCHMARK_DRAW_LINE();
+
+static const StringIdenticalToBM<std::string> stringIdenticalToBM;
+static const StringVariadicToBM<std::string> stringVariadicToBM;
+static const StringIdenticalToBM<fbstring> fbstringIdenticalToBM;
+static const StringVariadicToBM<fbstring> fbstringVariadicToBM;
+
 #define DEFINE_BENCHMARK_GROUP(n)                       \
   BENCHMARK_PARAM(u64ToAsciiClassicBM, n);              \
   BENCHMARK_RELATIVE_PARAM(u64ToAsciiTableBM, n);       \
@@ -969,9 +1150,23 @@ DEFINE_BENCHMARK_GROUP(19);
 
 #undef DEFINE_BENCHMARK_GROUP
 
+#define DEFINE_BENCHMARK_GROUP(T, n)                    \
+  BENCHMARK_PARAM(T ## VariadicToBM, n);                \
+  BENCHMARK_RELATIVE_PARAM(T ## IdenticalToBM, n);      \
+  BENCHMARK_DRAW_LINE();
+
+DEFINE_BENCHMARK_GROUP(string, 32);
+DEFINE_BENCHMARK_GROUP(string, 1024);
+DEFINE_BENCHMARK_GROUP(string, 32768);
+DEFINE_BENCHMARK_GROUP(fbstring, 32);
+DEFINE_BENCHMARK_GROUP(fbstring, 1024);
+DEFINE_BENCHMARK_GROUP(fbstring, 32768);
+
+#undef DEFINE_BENCHMARK_GROUP
+
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   auto ret = RUN_ALL_TESTS();
   if (!ret && FLAGS_benchmark) {
     folly::runBenchmarks();

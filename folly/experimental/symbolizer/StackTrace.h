@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,4 +47,3 @@ ssize_t getStackTraceSafe(uintptr_t* addresses, size_t maxAddresses);
 }}  // namespaces
 
 #endif /* FOLLY_SYMBOLIZER_STACKTRACE_H_ */
-

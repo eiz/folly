@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/detail/CacheLocality.h"
+#include <folly/detail/CacheLocality.h>
 
 #include <sched.h>
 #include <memory>
@@ -23,7 +23,7 @@
 #include <unordered_map>
 #include <glog/logging.h>
 #include <gtest/gtest.h>
-#include "folly/Benchmark.h"
+#include <folly/Benchmark.h>
 
 using namespace folly::detail;
 
@@ -552,7 +552,7 @@ static void contentionAtWidth(size_t iters, size_t stripes, size_t work,
       while (!go.load()) {
         sched_yield();
       }
-      std::atomic<int> localWork;
+      std::atomic<int> localWork(0);
       if (spreaderType == SpreaderType::SHARED) {
         for (size_t i = iters; i > 0; --i) {
           ++*(counters[AccessSpreader<>::current(stripes)]);
@@ -604,8 +604,8 @@ static void atomicIncrBaseline(size_t iters, size_t work,
       while (!go.load()) {
         sched_yield();
       }
-      std::atomic<size_t> localCounter;
-      std::atomic<int> localWork;
+      std::atomic<size_t> localCounter(0);
+      std::atomic<int> localWork(0);
       for (size_t i = iters; i > 0; --i) {
         localCounter++;
         for (size_t j = work; j > 0; --j) {
@@ -696,7 +696,7 @@ BENCHMARK_NAMED_PARAM(atomicIncrBaseline, local_incr_1000_work, 1000)
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   auto ret = RUN_ALL_TESTS();
   if (!ret && FLAGS_benchmark) {
     folly::runBenchmarks();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -241,6 +241,7 @@ public:
   size_type max_size() const    { return m_.cont_.max_size(); }
   bool empty() const            { return m_.cont_.empty();    }
   void reserve(size_type s)     { return m_.cont_.reserve(s); }
+  void shrink_to_fit()          { m_.cont_.shrink_to_fit();   }
   size_type capacity() const    { return m_.cont_.capacity(); }
 
   std::pair<iterator,bool> insert(const value_type& value) {
@@ -484,6 +485,7 @@ public:
   size_type max_size() const    { return m_.cont_.max_size(); }
   bool empty() const            { return m_.cont_.empty();    }
   void reserve(size_type s)     { return m_.cont_.reserve(s); }
+  void shrink_to_fit()          { m_.cont_.shrink_to_fit();   }
   size_type capacity() const    { return m_.cont_.capacity(); }
 
   std::pair<iterator,bool> insert(const value_type& value) {
@@ -548,6 +550,22 @@ public:
     if (it == end() || !key_comp()(key, it->first))
       return it;
     return end();
+  }
+
+  mapped_type& at(const key_type& key) {
+    iterator it = find(key);
+    if (it != end()) {
+      return it->second;
+    }
+    throw std::out_of_range("sorted_vector_map::at");
+  }
+
+  const mapped_type& at(const key_type& key) const {
+    const_iterator it = find(key);
+    if (it != end()) {
+      return it->second;
+    }
+    throw std::out_of_range("sorted_vector_map::at");
   }
 
   size_type count(const key_type& key) const {
@@ -638,4 +656,3 @@ inline void swap(sorted_vector_map<K,V,C,A,G>& a,
 }
 
 #endif
-

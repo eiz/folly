@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,15 +14,14 @@
  * limitations under the License.
  */
 
-#include "folly/Bits.h"
+#include <folly/Bits.h>
 
-#include "folly/CpuId.h"
-#include "folly/Portability.h"
+#include <folly/CpuId.h>
+#include <folly/Portability.h>
 
 // None of this is necessary if we're compiling for a target that supports
-// popcnt
-#ifndef __POPCNT__
-
+// popcnt, which includes MSVC
+#if !defined(__POPCNT__) && !defined(_MSC_VER)
 namespace {
 
 int popcount_builtin(unsigned int x) {
@@ -74,7 +73,7 @@ namespace detail {
 // or popcount_builtin
 int popcount(unsigned int x)
 #if FOLLY_HAVE_IFUNC && !defined(FOLLY_SANITIZE_ADDRESS)
-  __attribute__((ifunc("folly_popcount_ifunc")));
+  __attribute__((__ifunc__("folly_popcount_ifunc")));
 #else
 {  return popcount_builtin(x); }
 #endif
@@ -83,7 +82,7 @@ int popcount(unsigned int x)
 // or popcountll_builtin
 int popcountll(unsigned long long x)
 #if FOLLY_HAVE_IFUNC && !defined(FOLLY_SANITIZE_ADDRESS)
-  __attribute__((ifunc("folly_popcountll_ifunc")));
+  __attribute__((__ifunc__("folly_popcountll_ifunc")));
 #else
 {  return popcountll_builtin(x); }
 #endif

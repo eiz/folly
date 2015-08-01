@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,6 @@
 #ifndef FOLLY_SMALL_VECTOR_H_
 #define FOLLY_SMALL_VECTOR_H_
 
-#include "Portability.h"
-
 #include <stdexcept>
 #include <cstdlib>
 #include <type_traits>
@@ -46,13 +44,19 @@
 #include <boost/mpl/count.hpp>
 #include <boost/mpl/max.hpp>
 
-#include "folly/Malloc.h"
+#include <folly/FormatTraits.h>
+#include <folly/Malloc.h>
+#include <folly/Portability.h>
 
 #if defined(__GNUC__) && FOLLY_X64
-# include "folly/SmallLocks.h"
-# define FB_PACKED __attribute__((packed))
+# include <folly/SmallLocks.h>
+# define FB_PACK_ATTR FOLLY_PACK_ATTR
+# define FB_PACK_PUSH FOLLY_PACK_PUSH
+# define FB_PACK_POP FOLLY_PACK_POP
 #else
-# define FB_PACKED
+# define FB_PACK_ATTR
+# define FB_PACK_PUSH
+# define FB_PACK_POP
 #endif
 
 #if FOLLY_HAVE_MALLOC_SIZE
@@ -83,21 +87,6 @@ namespace small_vector_policy {
  */
 struct NoHeap;
 
-/*
- * Passing this policy will cause small_vector to provide lock() and
- * unlock() functions using a 1-bit spin lock in the size value.
- *
- * Note that this is intended for a fairly specialized (although
- * strangely common at facebook) use case, where you have billions of
- * vectors in memory where none of them are "hot" and most of them are
- * small.  This allows you to get fine-grained locks without spending
- * a lot of memory on mutexes (the alternative of a large hashtable of
- * locks leads to extra cache misses in the lookup path).
- *
- * __x86_64__ only.
- */
-struct OneBitMutex;
-
 //////////////////////////////////////////////////////////////////////
 
 } // small_vector_policy
@@ -120,10 +109,9 @@ namespace detail {
     !FOLLY_IS_TRIVIALLY_COPYABLE(T)
   >::type
   moveToUninitialized(T* first, T* last, T* out) {
-    auto const count = last - first;
     std::size_t idx = 0;
     try {
-      for (; idx < count; ++first, ++idx) {
+      for (; first != last; ++first, ++idx) {
         new (&out[idx]) T(std::move(*first));
       }
     } catch (...) {
@@ -268,65 +256,6 @@ namespace detail {
     SizeType size_;
   };
 
-#if FOLLY_X64
-  template<class SizeType, bool ShouldUseHeap>
-  struct OneBitMutexImpl {
-    typedef SizeType InternalSizeType;
-
-    OneBitMutexImpl() { psl_.init(); }
-
-    void lock()     const { psl_.lock(); }
-    void unlock()   const { psl_.unlock(); }
-    bool try_lock() const { return psl_.try_lock(); }
-
-  protected:
-    static bool const kShouldUseHeap = ShouldUseHeap;
-
-    static constexpr std::size_t policyMaxSize() {
-      return SizeType(~(SizeType(1) << kLockBit | kExternMask));
-    }
-
-    std::size_t doSize() const {
-      return psl_.getData() & ~kExternMask;
-    }
-
-    std::size_t isExtern() const {
-      return psl_.getData() & kExternMask;
-    }
-
-    void setExtern(bool b) {
-      if (b) {
-        setSize(SizeType(doSize()) | kExternMask);
-      } else {
-        setSize(SizeType(doSize()) & ~kExternMask);
-      }
-    }
-
-    void setSize(std::size_t sz) {
-      assert(sz < (std::size_t(1) << kLockBit));
-      psl_.setData((kExternMask & psl_.getData()) | SizeType(sz));
-    }
-
-    void swapSizePolicy(OneBitMutexImpl& o) {
-      std::swap(psl_, o.psl_);
-    }
-
-  private:
-    static SizeType const kLockBit = sizeof(SizeType) * 8 - 1;
-    static SizeType const kExternMask =
-      kShouldUseHeap ? SizeType(1) << (sizeof(SizeType) * 8 - 2)
-                     : 0;
-
-    PicoSpinLock<SizeType,kLockBit> psl_;
-  };
-#else
-  template<class SizeType, bool ShouldUseHeap>
-  struct OneBitMutexImpl {
-    static_assert(std::is_same<SizeType,void>::value,
-                  "OneBitMutex only works on x86-64");
-  };
-#endif
-
   /*
    * If you're just trying to use this class, ignore everything about
    * this next small_vector_base class thing.
@@ -367,17 +296,6 @@ namespace detail {
                   "Multiple size types specified in small_vector<>");
 
     /*
-     * Figure out if we're supposed to supply a one-bit mutex. :)
-     */
-    typedef typename mpl::count<
-      PolicyList,small_vector_policy::OneBitMutex
-    >::type HasMutex;
-
-    static_assert(HasMutex::value == 0 || HasMutex::value == 1,
-                  "Multiple copies of small_vector_policy::OneBitMutex "
-                  "supplied; this is probably a mistake");
-
-    /*
      * Determine whether we should allow spilling to the heap or not.
      */
     typedef typename mpl::count<
@@ -391,11 +309,8 @@ namespace detail {
     /*
      * Make the real policy base classes.
      */
-    typedef typename mpl::if_<
-      HasMutex,
-      OneBitMutexImpl<SizeType,!HasNoHeap::value>,
-      IntegralSizePolicy<SizeType,!HasNoHeap::value>
-    >::type ActualSizePolicy;
+    typedef IntegralSizePolicy<SizeType,!HasNoHeap::value>
+      ActualSizePolicy;
 
     /*
      * Now inherit from them all.  This is done in such a convoluted
@@ -427,7 +342,7 @@ namespace detail {
 }
 
 //////////////////////////////////////////////////////////////////////
-
+FB_PACK_PUSH
 template<class Value,
          std::size_t RequestedMaxInline    = 1,
          class PolicyA                     = void,
@@ -456,7 +371,7 @@ class small_vector
   };
 
 public:
-  typedef std::size_t size_type;
+  typedef std::size_t        size_type;
   typedef Value              value_type;
   typedef value_type&        reference;
   typedef value_type const&  const_reference;
@@ -467,14 +382,32 @@ public:
   typedef std::reverse_iterator<iterator>       reverse_iterator;
   typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
 
-  explicit small_vector() {}
+  explicit small_vector() = default;
 
   small_vector(small_vector const& o) {
-    assign(o.begin(), o.end());
+    auto n = o.size();
+    makeSize(n);
+    try {
+      std::uninitialized_copy(o.begin(), o.end(), begin());
+    } catch (...) {
+      if (this->isExtern()) {
+        u.freeHeap();
+      }
+      throw;
+    }
+    this->setSize(n);
   }
 
-  small_vector(small_vector&& o) {
-    *this = std::move(o);
+  small_vector(small_vector&& o)
+  noexcept(std::is_nothrow_move_constructible<Value>::value) {
+    if (o.isExtern()) {
+      swap(o);
+    } else {
+      std::uninitialized_copy(std::make_move_iterator(o.begin()),
+                              std::make_move_iterator(o.end()),
+                              begin());
+      this->setSize(o.size());
+    }
   }
 
   small_vector(std::initializer_list<value_type> il) {
@@ -508,16 +441,11 @@ public:
   }
 
   small_vector& operator=(small_vector&& o) {
+    // TODO: optimization:
+    // if both are internal, use move assignment where possible
+    if (this == &o) return *this;
     clear();
-    if (!o.isExtern()) {
-      makeSize(o.size());
-      for (std::size_t i = 0; i < o.size(); ++i) {
-        new (data() + i) value_type(std::move(o[i]));
-      }
-      this->setSize(o.size());
-    } else {
-      swap(o);
-    }
+    swap(o);
     return *this;
   }
 
@@ -592,19 +520,23 @@ public:
       }
 
       size_type i = oldSmall.size();
+      const size_type ci = i;
       try {
         for (; i < oldLarge.size(); ++i) {
-          new (&oldSmall[i]) value_type(std::move(oldLarge[i]));
+          auto addr = oldSmall.begin() + i;
+          new (addr) value_type(std::move(oldLarge[i]));
           oldLarge[i].~value_type();
         }
       } catch (...) {
+        oldSmall.setSize(i);
         for (; i < oldLarge.size(); ++i) {
           oldLarge[i].~value_type();
         }
-        oldLarge.setSize(oldSmall.size());
+        oldLarge.setSize(ci);
         throw;
       }
-      this->swapSizePolicy(o);
+      oldSmall.setSize(i);
+      oldLarge.setSize(ci);
       return;
     }
 
@@ -726,6 +658,17 @@ public:
     emplaceBack(std::forward<Args>(args)...);
   }
 
+  void emplace_back(const value_type& t) {
+    push_back(t);
+  }
+  void emplace_back(value_type& t) {
+    push_back(t);
+  }
+
+  void emplace_back(value_type&& t) {
+    push_back(std::move(t));
+  }
+
   void push_back(value_type&& t) {
     if (capacity() == size()) {
       makeSize(std::max(size_type(2), 3 * size() / 2), &t, size());
@@ -736,9 +679,17 @@ public:
   }
 
   void push_back(value_type const& t) {
-    // Make a copy and forward to the rvalue value_type&& overload
-    // above.
-    push_back(value_type(t));
+    // TODO: we'd like to make use of makeSize (it can be optimized better,
+    // because it manipulates the internals)
+    // unfortunately the current implementation only supports moving from
+    // a supplied rvalue, and doing an extra move just to reuse it is a perf
+    // net loss
+    if (size() == capacity()) {// && isInside(&t)) {
+      value_type tmp(t);
+      emplaceBack(std::move(tmp));
+    } else {
+      emplaceBack(t);
+    }
   }
 
   void pop_back() {
@@ -807,8 +758,9 @@ public:
   }
 
   iterator erase(const_iterator q1, const_iterator q2) {
+    if (q1 == q2) return unconst(q1);
     std::move(unconst(q2), end(), unconst(q1));
-    for (auto it = q1; it != end(); ++it) {
+    for (auto it = (end() - std::distance(q1, q2)); it != end(); ++it) {
       it->~value_type();
     }
     this->setSize(size() - (q2 - q1));
@@ -876,13 +828,6 @@ private:
     this->setSize(size() + 1);
   }
 
-  /*
-   * Special case of emplaceBack for rvalue
-   */
-  void emplaceBack(value_type&& t) {
-    push_back(std::move(t));
-  }
-
   static iterator unconst(const_iterator it) {
     return const_cast<iterator>(it);
   }
@@ -946,18 +891,31 @@ private:
     auto distance = std::distance(first, last);
     makeSize(distance);
     this->setSize(distance);
-
-    detail::populateMemForward(data(), distance,
-      [&] (void* p) { new (p) value_type(*first++); }
-    );
+    try {
+      detail::populateMemForward(data(), distance,
+        [&] (void* p) { new (p) value_type(*first++); }
+      );
+    } catch (...) {
+      if (this->isExtern()) {
+        u.freeHeap();
+      }
+      throw;
+    }
   }
 
   void doConstruct(size_type n, value_type const& val) {
     makeSize(n);
     this->setSize(n);
-    detail::populateMemForward(data(), n,
-      [&] (void* p) { new (p) value_type(val); }
-    );
+    try {
+      detail::populateMemForward(data(), n,
+        [&] (void* p) { new (p) value_type(val); }
+      );
+    } catch (...) {
+      if (this->isExtern()) {
+        u.freeHeap();
+      }
+      throw;
+    }
   }
 
   // The true_type means we should forward to the size_t,value_type
@@ -1086,7 +1044,7 @@ private:
     InternalSizeType* getCapacity() {
       return &capacity_;
     }
-  } FB_PACKED;
+  } FB_PACK_ATTR;
 
   struct HeapPtr {
     // Lower order bit of heap_ is used as flag to indicate whether capacity is
@@ -1098,7 +1056,7 @@ private:
       return static_cast<InternalSizeType*>(
         detail::pointerFlagClear(heap_));
     }
-  } FB_PACKED;
+  } FB_PACK_ATTR;
 
 #if FOLLY_X64
   typedef unsigned char InlineStorageType[sizeof(value_type) * MaxInline];
@@ -1167,8 +1125,9 @@ private:
       auto vp = detail::pointerFlagClear(pdata_.heap_);
       free(vp);
     }
-  } FB_PACKED u;
-} FB_PACKED;
+  } FB_PACK_ATTR u;
+} FB_PACK_ATTR;
+FB_PACK_POP
 
 //////////////////////////////////////////////////////////////////////
 
@@ -1182,12 +1141,24 @@ void swap(small_vector<T,MaxInline,A,B,C>& a,
 
 //////////////////////////////////////////////////////////////////////
 
-}
+namespace detail {
+
+// Format support.
+template <class T, size_t M, class A, class B, class C>
+struct IndexableTraits<small_vector<T, M, A, B, C>>
+  : public IndexableTraitsSeq<small_vector<T, M, A, B, C>> {
+};
+
+}  // namespace detail
+
+}  // namespace folly
 
 #pragma GCC diagnostic pop
 
-#ifdef FB_PACKED
-# undef FB_PACKED
+#ifdef FB_PACK_ATTR
+# undef FB_PACK_ATTR
+# undef FB_PACK_PUSH
+# undef FB_PACK_POP
 #endif
 
 #endif

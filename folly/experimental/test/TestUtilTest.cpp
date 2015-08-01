@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/experimental/TestUtil.h"
+#include <folly/experimental/TestUtil.h>
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -100,9 +100,43 @@ TEST(TemporaryDirectory, DeleteOnDestruction) {
   testTemporaryDirectory(TemporaryDirectory::Scope::DELETE_ON_DESTRUCTION);
 }
 
-int main(int argc, char *argv[]) {
-  testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
-  return RUN_ALL_TESTS();
+TEST(ChangeToTempDir, ChangeDir) {
+  auto pwd1 = fs::current_path();
+  {
+    ChangeToTempDir d;
+    EXPECT_NE(pwd1, fs::current_path());
+  }
+  EXPECT_EQ(pwd1, fs::current_path());
 }
 
+TEST(PCREPatternMatch, Simple) {
+  EXPECT_PCRE_MATCH(".*a.c.*", "gabca");
+  EXPECT_NO_PCRE_MATCH("a.c", "gabca");
+  EXPECT_NO_PCRE_MATCH(".*ac.*", "gabca");
+}
+
+TEST(CaptureFD, GlogPatterns) {
+  CaptureFD stderr(2);
+  LOG(INFO) << "All is well";
+  EXPECT_NO_PCRE_MATCH(glogErrOrWarnPattern(), stderr.readIncremental());
+  {
+    LOG(ERROR) << "Uh-oh";
+    auto s = stderr.readIncremental();
+    EXPECT_PCRE_MATCH(glogErrorPattern(), s);
+    EXPECT_NO_PCRE_MATCH(glogWarningPattern(), s);
+    EXPECT_PCRE_MATCH(glogErrOrWarnPattern(), s);
+  }
+  {
+    LOG(WARNING) << "Oops";
+    auto s = stderr.readIncremental();
+    EXPECT_NO_PCRE_MATCH(glogErrorPattern(), s);
+    EXPECT_PCRE_MATCH(glogWarningPattern(), s);
+    EXPECT_PCRE_MATCH(glogErrOrWarnPattern(), s);
+  }
+}
+
+int main(int argc, char *argv[]) {
+  testing::InitGoogleTest(&argc, argv);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
+  return RUN_ALL_TESTS();
+}

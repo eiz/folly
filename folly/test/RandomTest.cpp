@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-#include "folly/Random.h"
-#include "folly/Range.h"
-#include "folly/Benchmark.h"
-#include "folly/Foreach.h"
+#include <folly/Random.h>
+#include <folly/Range.h>
+#include <folly/Benchmark.h>
+#include <folly/Foreach.h>
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
@@ -29,6 +29,19 @@
 
 using namespace folly;
 
+TEST(Random, StateSize) {
+  using namespace folly::detail;
+
+  // uint_fast32_t is uint64_t on x86_64, w00t
+  EXPECT_EQ(sizeof(uint_fast32_t) / 4 + 3,
+            StateSize<std::minstd_rand0>::value);
+  EXPECT_EQ(624, StateSize<std::mt19937>::value);
+#if FOLLY_USE_SIMD_PRNG
+  EXPECT_EQ(624, StateSize<__gnu_cxx::sfmt19937>::value);
+#endif
+  EXPECT_EQ(24, StateSize<std::ranlux24_base>::value);
+}
+
 TEST(Random, Simple) {
   uint32_t prev = 0, seed = 0;
   for (int i = 0; i < 1024; ++i) {
@@ -38,7 +51,7 @@ TEST(Random, Simple) {
 }
 
 TEST(Random, MultiThreaded) {
-  const int n = 1024;
+  const int n = 100;
   std::vector<uint32_t> seeds(n);
   std::vector<std::thread> threads;
   for (int i = 0; i < n; ++i) {
@@ -100,7 +113,7 @@ BENCHMARK(Random64OneIn) { doNotOptimizeAway(Random::oneIn(100)); }
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   if (FLAGS_benchmark) {
     folly::runBenchmarks();

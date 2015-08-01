@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,22 +18,26 @@
 #error This file may only be included from folly/Uri.h
 #endif
 
-#include "folly/Conv.h"
+#include <folly/Conv.h>
 
 namespace folly {
 
 template <class String>
 String Uri::toString() const {
   String str;
-  toAppend(scheme_, "://", &str);
-  if (!password_.empty()) {
-    toAppend(username_, ":", password_, "@", &str);
-  } else if (!username_.empty()) {
-    toAppend(username_, "@", &str);
-  }
-  toAppend(host_, &str);
-  if (port_ != 0) {
-    toAppend(":", port_, &str);
+  if (hasAuthority_) {
+    toAppend(scheme_, "://", &str);
+    if (!password_.empty()) {
+      toAppend(username_, ":", password_, "@", &str);
+    } else if (!username_.empty()) {
+      toAppend(username_, "@", &str);
+    }
+    toAppend(host_, &str);
+    if (port_ != 0) {
+      toAppend(":", port_, &str);
+    }
+  } else {
+    toAppend(scheme_, ":", &str);
   }
   toAppend(path_, &str);
   if (!query_.empty()) {
@@ -46,4 +50,3 @@ String Uri::toString() const {
 }
 
 }  // namespace folly
-

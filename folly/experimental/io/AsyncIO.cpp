@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,22 +14,22 @@
  * limitations under the License.
  */
 
-#include "folly/experimental/io/AsyncIO.h"
+#include <folly/experimental/io/AsyncIO.h>
 
 #include <sys/eventfd.h>
 #include <unistd.h>
 #include <cerrno>
+#include <ostream>
 #include <stdexcept>
 #include <string>
-#include <fstream>
 
 #include <boost/intrusive/parent_from_member.hpp>
 #include <glog/logging.h>
 
-#include "folly/Exception.h"
-#include "folly/Format.h"
-#include "folly/Likely.h"
-#include "folly/String.h"
+#include <folly/Exception.h>
+#include <folly/Format.h>
+#include <folly/Likely.h>
+#include <folly/String.h>
 
 namespace folly {
 
@@ -108,6 +108,7 @@ AsyncIO::AsyncIO(size_t capacity, PollMode pollMode)
   : ctx_(0),
     ctxSet_(false),
     pending_(0),
+    submitted_(0),
     capacity_(capacity),
     pollFd_(-1) {
   CHECK_GT(capacity_, 0);
@@ -130,7 +131,7 @@ AsyncIO::~AsyncIO() {
 }
 
 void AsyncIO::decrementPending() {
-  ssize_t p = pending_.fetch_add(-1, std::memory_order_acq_rel);
+  auto p = pending_.fetch_add(-1, std::memory_order_acq_rel);
   DCHECK_GE(p, 1);
 }
 
@@ -168,7 +169,7 @@ void AsyncIO::submit(Op* op) {
   initializeContext();  // on demand
 
   // We can increment past capacity, but we'll clean up after ourselves.
-  ssize_t p = pending_.fetch_add(1, std::memory_order_acq_rel);
+  auto p = pending_.fetch_add(1, std::memory_order_acq_rel);
   if (p >= capacity_) {
     decrementPending();
     throw std::range_error("AsyncIO: too many pending requests");
@@ -183,6 +184,7 @@ void AsyncIO::submit(Op* op) {
     decrementPending();
     throwSystemErrorExplicit(-rc, "AsyncIO: io_submit failed");
   }
+  submitted_++;
   DCHECK_EQ(rc, 1);
   op->start();
 }
@@ -190,7 +192,7 @@ void AsyncIO::submit(Op* op) {
 Range<AsyncIO::Op**> AsyncIO::wait(size_t minRequests) {
   CHECK(ctx_);
   CHECK_EQ(pollFd_, -1) << "wait() only allowed on non-pollable object";
-  ssize_t p = pending_.load(std::memory_order_acquire);
+  auto p = pending_.load(std::memory_order_acquire);
   CHECK_LE(minRequests, p);
   return doWait(minRequests, p);
 }
@@ -220,13 +222,25 @@ Range<AsyncIO::Op**> AsyncIO::pollCompleted() {
 
 Range<AsyncIO::Op**> AsyncIO::doWait(size_t minRequests, size_t maxRequests) {
   io_event events[maxRequests];
-  int count;
+
+  size_t count = 0;
   do {
-    // Wait forever
-    count = io_getevents(ctx_, minRequests, maxRequests, events, nullptr);
-  } while (count == -EINTR);
-  checkKernelError(count, "AsyncIO: io_getevents failed");
-  DCHECK_GE(count, minRequests);  // the man page says so
+    int ret;
+    do {
+      // GOTCHA: io_getevents() may returns less than min_nr results if
+      // interrupted after some events have been read (if before, -EINTR
+      // is returned).
+      ret = io_getevents(ctx_,
+                         minRequests - count,
+                         maxRequests - count,
+                         events + count,
+                         /* timeout */ nullptr);  // wait forever
+    } while (ret == -EINTR);
+    // Check as may not be able to recover without leaking events.
+    CHECK_GE(ret, 0)
+      << "AsyncIO: io_getevents failed with error " << errnoStr(-ret);
+    count += ret;
+  } while (count < minRequests);
   DCHECK_LE(count, maxRequests);
 
   completed_.clear();
@@ -354,7 +368,11 @@ std::ostream& operator<<(std::ostream& os, const AsyncIOOp& op) {
   }
 
   if (op.state_ == AsyncIOOp::State::COMPLETED) {
-    os << "result=" << op.result_ << ", ";
+    os << "result=" << op.result_;
+    if (op.result_ < 0) {
+      os << " (" << errnoStr(-op.result_) << ')';
+    }
+    os << ", ";
   }
 
   return os << "}";
@@ -365,4 +383,3 @@ std::ostream& operator<<(std::ostream& os, AsyncIOOp::State state) {
 }
 
 }  // namespace folly
-

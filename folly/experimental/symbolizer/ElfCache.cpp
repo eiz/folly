@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/experimental/symbolizer/ElfCache.h"
+#include <folly/experimental/symbolizer/ElfCache.h>
 
 namespace folly { namespace symbolizer {
 
@@ -46,7 +46,10 @@ std::shared_ptr<ElfFile> SignalSafeElfCache::getFile(StringPiece p) {
   }
 
   auto& f = slots_[n];
-  if (f->openNoThrow(path.data()) == -1) {
+
+  const char* msg = "";
+  int r = f->openNoThrow(path.data(), true, &msg);
+  if (r != ElfFile::kSuccess) {
     return nullptr;
   }
 
@@ -73,7 +76,9 @@ std::shared_ptr<ElfFile> ElfCache::getFile(StringPiece p) {
   auto& path = entry->path;
 
   // No negative caching
-  if (entry->file.openNoThrow(path.c_str()) == -1) {
+  const char* msg = "";
+  int r = entry->file.openNoThrow(path.c_str(), true, &msg);
+  if (r != ElfFile::kSuccess) {
     return nullptr;
   }
 
@@ -95,4 +100,3 @@ std::shared_ptr<ElfFile> ElfCache::filePtr(const std::shared_ptr<Entry>& e) {
 }
 
 }}  // namespaces
-

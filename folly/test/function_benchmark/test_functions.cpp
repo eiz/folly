@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "folly/test/function_benchmark/test_functions.h"
+#include <folly/test/function_benchmark/test_functions.h>
 
 /*
  * These functions are defined in a separate file so that
@@ -25,11 +25,9 @@
 class Exception : public std::exception {
  public:
   explicit Exception(const std::string& value) : value_(value) {}
-  virtual ~Exception(void) throw() {}
+  ~Exception(void) noexcept override {}
 
-  virtual const char *what(void) const throw() {
-    return value_.c_str();
-  }
+  const char* what(void) const noexcept override { return value_.c_str(); }
 
  private:
   std::string value_;

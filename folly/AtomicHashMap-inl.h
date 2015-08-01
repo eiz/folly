@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 #error "This should only be included by AtomicHashMap.h"
 #endif
 
-#include "folly/detail/AtomicHashUtils.h"
+#include <folly/detail/AtomicHashUtils.h>
 
 namespace folly {
 
@@ -32,14 +32,14 @@ AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::defaultConfig;
 template <typename KeyT, typename ValueT,
           typename HashFcn, typename EqualFcn, typename Allocator>
 AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
-AtomicHashMap(size_t size, const Config& config)
+AtomicHashMap(size_t finalSizeEst, const Config& config)
   : kGrowthFrac_(config.growthFactor < 0 ?
                  1.0 - config.maxLoadFactor : config.growthFactor) {
   CHECK(config.maxLoadFactor > 0.0 && config.maxLoadFactor < 1.0);
-  subMaps_[0].store(SubMap::create(size, config).release(),
+  subMaps_[0].store(SubMap::create(finalSizeEst, config).release(),
     std::memory_order_relaxed);
-  auto numSubMaps = kNumSubMaps_;
-  FOR_EACH_RANGE(i, 1, numSubMaps) {
+  auto subMapCount = kNumSubMaps_;
+  FOR_EACH_RANGE(i, 1, subMapCount) {
     subMaps_[i].store(nullptr, std::memory_order_relaxed);
   }
   numMapsAllocated_.store(1, std::memory_order_relaxed);
@@ -78,7 +78,7 @@ typename AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::SimpleRetT
 AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
 insertInternal(key_type key, T&& value) {
  beginInsertInternal:
-  int nextMapIdx = // this maintains our state
+  auto nextMapIdx = // this maintains our state
     numMapsAllocated_.load(std::memory_order_acquire);
   typename SubMap::SimpleRetT ret;
   FOR_EACH_RANGE(i, 0, nextMapIdx) {
@@ -130,9 +130,9 @@ insertInternal(key_type key, T&& value) {
   } else {
     // If we lost the race, we'll have to wait for the next map to get
     // allocated before doing any insertion here.
-    FOLLY_SPIN_WAIT(
-      nextMapIdx >= numMapsAllocated_.load(std::memory_order_acquire)
-    );
+    detail::atomic_hash_spin_wait([&] {
+      return nextMapIdx >= numMapsAllocated_.load(std::memory_order_acquire);
+    });
   }
 
   // Relaxed is ok here because either we just created this map, or we
@@ -370,9 +370,7 @@ struct AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::ahm_iterator
       : ahm_(ahm)
       , subMap_(subMap)
       , subIt_(subIt)
-  {
-    checkAdvanceToNextSubmap();
-  }
+  {}
 
   friend class boost::iterator_core_access;
 
@@ -408,7 +406,7 @@ struct AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::ahm_iterator
 
     SubMap* thisMap = ahm_->subMaps_[subMap_].
       load(std::memory_order_relaxed);
-    if (subIt_ == thisMap->end()) {
+    while (subIt_ == thisMap->end()) {
       // This sub iterator is done, advance to next one
       if (subMap_ + 1 <
           ahm_->numMapsAllocated_.load(std::memory_order_acquire)) {
@@ -417,6 +415,7 @@ struct AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::ahm_iterator
         subIt_ = thisMap->begin();
       } else {
         ahm_ = nullptr;
+        return;
       }
     }
   }
@@ -428,5 +427,3 @@ struct AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::ahm_iterator
 }; // ahm_iterator
 
 } // namespace folly
-
-#undef FOLLY_SPIN_WAIT

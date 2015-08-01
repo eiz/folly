@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,14 @@
  * limitations under the License.
  */
 
-#include "folly/detail/FunctionalExcept.h"
+#include <folly/Portability.h>
+
+// If FOLLY_HAVE_BITS_FUNCTEXCEPT_H is set, this file compiles to
+// nothing.
+
+#if !FOLLY_HAVE_BITS_FUNCTEXCEPT_H
+
+#include <folly/detail/FunctionalExcept.h>
 
 #include <stdexcept>
 
@@ -32,4 +39,12 @@ void __throw_out_of_range(const char* msg) {
   throw std::out_of_range(msg);
 }
 
+#if defined(_MSC_VER)
+void __throw_bad_alloc() {
+  throw std::bad_alloc();
+}
+#endif
+
 FOLLY_NAMESPACE_STD_END
+
+#endif

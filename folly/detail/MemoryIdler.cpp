@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "MemoryIdler.h"
+#include <folly/detail/MemoryIdler.h>
 #include <folly/Logging.h>
 #include <folly/Malloc.h>
 #include <folly/ScopeGuard.h>
@@ -26,13 +26,6 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <utility>
-
-
-// weak linking means the symbol will be null if not available, instead
-// of a link failure
-extern "C" int mallctl(const char *name, void *oldp, size_t *oldlenp,
-                       void *newp, size_t newlen)
-    __attribute__((weak));
 
 
 namespace folly { namespace detail {
@@ -87,7 +80,10 @@ void MemoryIdler::flushLocalMallocCaches() {
 }
 
 
-#if FOLLY_X64
+// Stack madvise isn't Linux or glibc specific, but the system calls
+// and arithmetic (and bug compatibility) are not portable.  The set of
+// platforms could be increased if it was useful.
+#if FOLLY_X64 && defined(_GNU_SOURCE) && defined(__linux__)
 
 static const size_t s_pageSize = sysconf(_SC_PAGESIZE);
 static FOLLY_TLS uintptr_t tls_stackLimit;
@@ -95,11 +91,7 @@ static FOLLY_TLS size_t tls_stackSize;
 
 static void fetchStackLimits() {
   pthread_attr_t attr;
-#if defined(_GNU_SOURCE) && defined(__linux__) // Linux+GNU extension
   pthread_getattr_np(pthread_self(), &attr);
-#else
-  pthread_attr_init(&attr);
-#endif
   SCOPE_EXIT { pthread_attr_destroy(&attr); };
 
   void* addr;

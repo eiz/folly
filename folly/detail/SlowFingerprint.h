@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@
 #ifndef FOLLY_DETAIL_SLOWFINGERPRINT_H_
 #define FOLLY_DETAIL_SLOWFINGERPRINT_H_
 
-#include "folly/Fingerprint.h"
-#include "folly/detail/FingerprintPolynomial.h"
-#include "folly/Range.h"
+#include <folly/Fingerprint.h>
+#include <folly/detail/FingerprintPolynomial.h>
+#include <folly/Range.h>
 
 namespace folly {
 namespace detail {
@@ -54,7 +54,7 @@ class SlowFingerprint {
     return *this;
   }
 
-  SlowFingerprint& update(const folly::StringPiece& str) {
+  SlowFingerprint& update(const folly::StringPiece str) {
     const char* p = str.start();
     for (int i = str.size(); i != 0; p++, i--) {
       update8(static_cast<uint8_t>(*p));
@@ -90,4 +90,3 @@ class SlowFingerprint {
 }  // namespace folly
 
 #endif /* FOLLY_DETAIL_SLOWFINGERPRINT_H_ */
-

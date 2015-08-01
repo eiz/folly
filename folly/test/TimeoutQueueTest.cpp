@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "folly/TimeoutQueue.h"
+#include <folly/TimeoutQueue.h>
 
 using namespace folly;
 
@@ -110,4 +110,3 @@ TEST(TimeoutQueue, RunOnceReschedule) {
   EXPECT_EQ(std::numeric_limits<int64_t>::max(), q.runLoop(0));
   EXPECT_EQ(100, count);
 }
-

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,11 +24,11 @@
 #include <memory>
 #include <system_error>
 
-#include "folly/AtomicStruct.h"
-#include "folly/Baton.h"
-#include "folly/IndexedMemPool.h"
-#include "folly/Likely.h"
-#include "folly/detail/CacheLocality.h"
+#include <folly/AtomicStruct.h>
+#include <folly/Baton.h>
+#include <folly/IndexedMemPool.h>
+#include <folly/Likely.h>
+#include <folly/detail/CacheLocality.h>
 
 namespace folly {
 
@@ -265,11 +265,11 @@ class LifoSemHead {
   }
 
   /// Returns the LifoSemHead that results from pushing a new waiter node
-  inline LifoSemHead withPush(uint32_t idx) const {
+  inline LifoSemHead withPush(uint32_t _idx) const {
     assert(isNodeIdx() || value() == 0);
     assert(!isShutdown());
-    assert(idx != 0);
-    return LifoSemHead{ (bits & SeqMask) | IsNodeIdxMask | idx };
+    assert(_idx != 0);
+    return LifoSemHead{ (bits & SeqMask) | IsNodeIdxMask | _idx };
   }
 
   /// Returns the LifoSemHead with value increased by delta, with
@@ -504,8 +504,8 @@ struct LifoSemBase : boost::noncopyable {
 
  private:
 
-  folly::AtomicStruct<LifoSemHead,Atom> head_
-      FOLLY_ALIGN_TO_AVOID_FALSE_SHARING;
+  FOLLY_ALIGN_TO_AVOID_FALSE_SHARING
+  folly::AtomicStruct<LifoSemHead,Atom> head_;
 
   char padding_[folly::detail::CacheLocality::kFalseSharingRange -
       sizeof(LifoSemHead)];

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@
 #ifndef FOLLY_TIMESERIES_HISTOGRAM_DEF_H_
 #define FOLLY_TIMESERIES_HISTOGRAM_DEF_H_
 
-#include "folly/Conv.h"
-#include "folly/stats/Histogram-defs.h"
-#include "folly/stats/MultiLevelTimeSeries-defs.h"
-#include "folly/stats/BucketedTimeSeries-defs.h"
+#include <folly/Conv.h>
+#include <folly/stats/Histogram-defs.h>
+#include <folly/stats/MultiLevelTimeSeries-defs.h>
+#include <folly/stats/BucketedTimeSeries-defs.h>
 
 namespace folly {
 
@@ -28,13 +28,13 @@ template <class T, class TT, class C>
 template <typename ReturnType>
 ReturnType TimeseriesHistogram<T, TT, C>::avg(int level) const {
   ValueType total = ValueType();
-  int64_t count = 0;
-  for (int b = 0; b < buckets_.getNumBuckets(); ++b) {
+  int64_t nsamples = 0;
+  for (unsigned int b = 0; b < buckets_.getNumBuckets(); ++b) {
     const auto& levelObj = buckets_.getByIndex(b).getLevel(level);
     total += levelObj.sum();
-    count += levelObj.count();
+    nsamples += levelObj.count();
   }
-  return folly::detail::avgHelper<ReturnType>(total, count);
+  return folly::detail::avgHelper<ReturnType>(total, nsamples);
 }
 
 template <class T, class TT, class C>
@@ -42,13 +42,13 @@ template <typename ReturnType>
 ReturnType TimeseriesHistogram<T, TT, C>::avg(TimeType start,
                                               TimeType end) const {
   ValueType total = ValueType();
-  int64_t count = 0;
-  for (int b = 0; b < buckets_.getNumBuckets(); ++b) {
+  int64_t nsamples = 0;
+  for (unsigned int b = 0; b < buckets_.getNumBuckets(); ++b) {
     const auto& levelObj = buckets_.getByIndex(b).getLevel(start, end);
     total += levelObj.sum(start, end);
-    count += levelObj.count(start, end);
+    nsamples += levelObj.count(start, end);
   }
-  return folly::detail::avgHelper<ReturnType>(total, count);
+  return folly::detail::avgHelper<ReturnType>(total, nsamples);
 }
 
 template <class T, class TT, class C>
@@ -57,7 +57,7 @@ ReturnType TimeseriesHistogram<T, TT, C>::rate(TimeType start,
                                                TimeType end) const {
   ValueType total = ValueType();
   TimeType elapsed(0);
-  for (int b = 0; b < buckets_.getNumBuckets(); ++b) {
+  for (unsigned int b = 0; b < buckets_.getNumBuckets(); ++b) {
     const auto& level = buckets_.getByIndex(b).getLevel(start);
     total += level.sum(start, end);
     elapsed = std::max(elapsed, level.elapsed(start, end));
@@ -169,7 +169,7 @@ template <typename T, typename TT, typename C>
 T TimeseriesHistogram<T, TT, C>::rate(int level) const {
   ValueType total = ValueType();
   TimeType elapsed(0);
-  for (int b = 0; b < buckets_.getNumBuckets(); ++b) {
+  for (unsigned int b = 0; b < buckets_.getNumBuckets(); ++b) {
     const auto& levelObj = buckets_.getByIndex(b).getLevel(level);
     total += levelObj.sum();
     elapsed = std::max(elapsed, levelObj.elapsed());
@@ -179,14 +179,14 @@ T TimeseriesHistogram<T, TT, C>::rate(int level) const {
 
 template <typename T, typename TT, typename C>
 void TimeseriesHistogram<T, TT, C>::clear() {
-  for (int i = 0; i < buckets_.getNumBuckets(); i++) {
+  for (size_t i = 0; i < buckets_.getNumBuckets(); i++) {
     buckets_.getByIndex(i).clear();
   }
 }
 
 template <typename T, typename TT, typename C>
 void TimeseriesHistogram<T, TT, C>::update(TimeType now) {
-  for (int i = 0; i < buckets_.getNumBuckets(); i++) {
+  for (size_t i = 0; i < buckets_.getNumBuckets(); i++) {
     buckets_.getByIndex(i).update(now);
   }
 }
@@ -195,7 +195,7 @@ template <typename T, typename TT, typename C>
 std::string TimeseriesHistogram<T, TT, C>::getString(int level) const {
   std::string result;
 
-  for (int i = 0; i < buckets_.getNumBuckets(); i++) {
+  for (size_t i = 0; i < buckets_.getNumBuckets(); i++) {
     if (i > 0) {
       toAppend(",", &result);
     }
@@ -213,7 +213,7 @@ std::string TimeseriesHistogram<T, TT, C>::getString(TimeType start,
                                                      TimeType end) const {
   std::string result;
 
-  for (int i = 0; i < buckets_.getNumBuckets(); i++) {
+  for (size_t i = 0; i < buckets_.getNumBuckets(); i++) {
     if (i > 0) {
       toAppend(",", &result);
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,119 +36,20 @@
 #include <type_traits>
 #include <utility>
 
-#include "folly/Likely.h"
-#include "folly/Malloc.h"
-#include "folly/Traits.h"
+#include <folly/FormatTraits.h>
+#include <folly/Likely.h>
+#include <folly/Malloc.h>
+#include <folly/Traits.h>
 
 #include <boost/operators.hpp>
-
-// some files expected these from FBVector
-#include <limits>
-#include "folly/Foreach.h"
-#include <boost/type_traits.hpp>
-#include <boost/utility/enable_if.hpp>
 
 //=============================================================================
 // forward declaration
 
-#ifdef FOLLY_BENCHMARK_USE_NS_IFOLLY
-namespace Ifolly {
-#else
 namespace folly {
-#endif
   template <class T, class Allocator = std::allocator<T>>
   class fbvector;
 }
-
-//=============================================================================
-// compatibility
-
-#if __GNUC__ < 4 || __GNUC__ == 4 && __GNUC_MINOR__ < 7
-// PLEASE UPGRADE TO GCC 4.7 or above
-#define FOLLY_FBV_COMPATIBILITY_MODE
-#endif
-
-#ifndef FOLLY_FBV_COMPATIBILITY_MODE
-
-namespace folly {
-
-template <typename A>
-struct fbv_allocator_traits
-  : std::allocator_traits<A> {};
-
-template <typename T>
-struct fbv_is_nothrow_move_constructible
-  : std::is_nothrow_move_constructible<T> {};
-
-template <typename T, typename... Args>
-struct fbv_is_nothrow_constructible
-  : std::is_nothrow_constructible<T, Args...> {};
-
-template <typename T>
-struct fbv_is_copy_constructible
-  : std::is_copy_constructible<T> {};
-
-}
-
-#else
-
-namespace folly {
-
-template <typename A>
-struct fbv_allocator_traits {
-  static_assert(sizeof(A) == 0,
-    "If you want to use a custom allocator, then you must upgrade to gcc 4.7");
-  // for some old code that deals with this case, see D566719, diff number 10.
-};
-
-template <typename T>
-struct fbv_allocator_traits<std::allocator<T>> {
-  typedef std::allocator<T> A;
-
-  typedef T* pointer;
-  typedef const T* const_pointer;
-  typedef size_t size_type;
-
-  typedef std::false_type propagate_on_container_copy_assignment;
-  typedef std::false_type propagate_on_container_move_assignment;
-  typedef std::false_type propagate_on_container_swap;
-
-  static pointer allocate(A& a, size_type n) {
-    return static_cast<pointer>(::operator new(n * sizeof(T)));
-  }
-  static void deallocate(A& a, pointer p, size_type n) {
-    ::operator delete(p);
-  }
-
-  template <typename R, typename... Args>
-  static void construct(A& a, R* p, Args&&... args) {
-    new (p) R(std::forward<Args>(args)...);
-  }
-  template <typename R>
-  static void destroy(A& a, R* p) {
-    p->~R();
-  }
-
-  static A select_on_container_copy_construction(const A& a) {
-    return a;
-  }
-};
-
-template <typename T>
-struct fbv_is_nothrow_move_constructible
-  : std::false_type {};
-
-template <typename T, typename... Args>
-struct fbv_is_nothrow_constructible
-  : std::false_type {};
-
-template <typename T>
-struct fbv_is_copy_constructible
-  : std::true_type {};
-
-}
-
-#endif
 
 //=============================================================================
 // unrolling
@@ -170,11 +71,7 @@ struct fbv_is_copy_constructible
 //                                                                           //
 ///////////////////////////////////////////////////////////////////////////////
 
-#ifdef FOLLY_BENCHMARK_USE_NS_IFOLLY
-namespace Ifolly {
-#else
 namespace folly {
-#endif
 
 template <class T, class Allocator>
 class fbvector : private boost::totally_ordered<fbvector<T, Allocator>> {
@@ -184,7 +81,7 @@ class fbvector : private boost::totally_ordered<fbvector<T, Allocator>> {
   // implementation
 private:
 
-  typedef folly::fbv_allocator_traits<Allocator> A;
+  typedef std::allocator_traits<Allocator> A;
 
   struct Impl : public Allocator {
     // typedefs
@@ -196,16 +93,16 @@ private:
 
     // constructors
     Impl() : Allocator(), b_(nullptr), e_(nullptr), z_(nullptr) {}
-    Impl(const Allocator& a)
+    /* implicit */ Impl(const Allocator& a)
       : Allocator(a), b_(nullptr), e_(nullptr), z_(nullptr) {}
-    Impl(Allocator&& a)
+    /* implicit */ Impl(Allocator&& a)
       : Allocator(std::move(a)), b_(nullptr), e_(nullptr), z_(nullptr) {}
 
-    Impl(size_type n, const Allocator& a = Allocator())
+    /* implicit */ Impl(size_type n, const Allocator& a = Allocator())
       : Allocator(a)
       { init(n); }
 
-    Impl(Impl&& other)
+    Impl(Impl&& other) noexcept
       : Allocator(std::move(other)),
         b_(other.b_), e_(other.e_), z_(other.z_)
       { other.b_ = other.e_ = other.z_ = nullptr; }
@@ -221,7 +118,7 @@ private:
       if (usingStdAllocator::value) {
         return static_cast<T*>(malloc(n * sizeof(T)));
       } else {
-        return folly::fbv_allocator_traits<Allocator>::allocate(*this, n);
+        return std::allocator_traits<Allocator>::allocate(*this, n);
       }
     }
 
@@ -229,7 +126,7 @@ private:
       if (usingStdAllocator::value) {
         free(p);
       } else {
-        folly::fbv_allocator_traits<Allocator>::deallocate(*this, p, n);
+        std::allocator_traits<Allocator>::deallocate(*this, p, n);
       }
     }
 
@@ -360,7 +257,7 @@ private:
     if (usingStdAllocator::value) {
       new (p) U(std::forward<Args>(args)...);
     } else {
-      folly::fbv_allocator_traits<Allocator>::construct(
+      std::allocator_traits<Allocator>::construct(
         impl_, p, std::forward<Args>(args)...);
     }
   }
@@ -372,7 +269,7 @@ private:
 
   template <typename U, typename... Args>
   static void S_construct_a(Allocator& a, U* p, Args&&... args) {
-    folly::fbv_allocator_traits<Allocator>::construct(
+    std::allocator_traits<Allocator>::construct(
       a, p, std::forward<Args>(args)...);
   }
 
@@ -384,7 +281,7 @@ private:
     if (usingStdAllocator::value) {
       *p = arg;
     } else {
-      folly::fbv_allocator_traits<Allocator>::construct(impl_, p, arg);
+      std::allocator_traits<Allocator>::construct(impl_, p, arg);
     }
   }
 
@@ -397,7 +294,7 @@ private:
   template <typename U, typename Enable = typename
     std::enable_if<std::is_scalar<U>::value>::type>
   static void S_construct_a(Allocator& a, U* p, U arg) {
-    folly::fbv_allocator_traits<Allocator>::construct(a, p, arg);
+    std::allocator_traits<Allocator>::construct(a, p, arg);
   }
 
   // const& optimization
@@ -407,7 +304,7 @@ private:
     if (usingStdAllocator::value) {
       new (p) U(value);
     } else {
-      folly::fbv_allocator_traits<Allocator>::construct(impl_, p, value);
+      std::allocator_traits<Allocator>::construct(impl_, p, value);
     }
   }
 
@@ -420,7 +317,7 @@ private:
   template <typename U, typename Enable = typename
     std::enable_if<!std::is_scalar<U>::value>::type>
   static void S_construct_a(Allocator& a, U* p, const U& value) {
-    folly::fbv_allocator_traits<Allocator>::construct(a, p, value);
+    std::allocator_traits<Allocator>::construct(a, p, value);
   }
 
   //---------------------------------------------------------------------------
@@ -430,7 +327,7 @@ private:
     if (usingStdAllocator::value) {
       if (!boost::has_trivial_destructor<T>::value) p->~T();
     } else {
-      folly::fbv_allocator_traits<Allocator>::destroy(impl_, p);
+      std::allocator_traits<Allocator>::destroy(impl_, p);
     }
   }
 
@@ -461,7 +358,7 @@ private:
   // allocator
   static void S_destroy_range_a(Allocator& a, T* first, T* last) noexcept {
     for (; first != last; ++first)
-      folly::fbv_allocator_traits<Allocator>::destroy(a, first);
+      std::allocator_traits<Allocator>::destroy(a, first);
   }
 
   // optimized
@@ -523,7 +420,7 @@ private:
     auto e = dest + sz;
     try {
       for (; b != e; ++b)
-        folly::fbv_allocator_traits<Allocator>::construct(a, b,
+        std::allocator_traits<Allocator>::construct(a, b,
           std::forward<Args>(args)...);
     } catch (...) {
       S_destroy_range_a(a, dest, b);
@@ -605,7 +502,7 @@ private:
     auto b = dest;
     try {
       for (; first != last; ++first, ++b)
-        folly::fbv_allocator_traits<Allocator>::construct(a, b, *first);
+        std::allocator_traits<Allocator>::construct(a, b, *first);
     } catch (...) {
       S_destroy_range_a(a, dest, b);
       throw;
@@ -627,7 +524,7 @@ private:
 
   static void
   S_uninitialized_copy_bits(T* dest, const T* first, const T* last) {
-    std::memcpy(dest, first, (last - first) * sizeof(T));
+    std::memcpy((void*)dest, (void*)first, (last - first) * sizeof(T));
   }
 
   static void
@@ -635,7 +532,7 @@ private:
                        std::move_iterator<T*> last) {
     T* bFirst = first.base();
     T* bLast = last.base();
-    std::memcpy(dest, bFirst, (bLast - bFirst) * sizeof(T));
+    std::memcpy((void*)dest, (void*)bFirst, (bLast - bFirst) * sizeof(T));
   }
 
   template <typename It>
@@ -660,7 +557,7 @@ private:
 
   static const T* S_copy_n(T* dest, const T* first, size_type n) {
     if (folly::IsTriviallyCopyable<T>::value) {
-      std::memcpy(dest, first, n * sizeof(T));
+      std::memcpy((void*)dest, (void*)first, n * sizeof(T));
       return first + n;
     } else {
       return S_copy_n<const T*>(dest, first, n);
@@ -671,7 +568,7 @@ private:
   S_copy_n(T* dest, std::move_iterator<T*> mIt, size_type n) {
     if (folly::IsTriviallyCopyable<T>::value) {
       T* first = mIt.base();
-      std::memcpy(dest, first, n * sizeof(T));
+      std::memcpy((void*)dest, (void*)first, n * sizeof(T));
       return std::make_move_iterator(first + n);
     } else {
       return S_copy_n<std::move_iterator<T*>>(dest, mIt, n);
@@ -730,9 +627,9 @@ private:
     > relocate_use_memcpy;
 
   typedef std::integral_constant<bool,
-      (folly::fbv_is_nothrow_move_constructible<T>::value
+      (std::is_nothrow_move_constructible<T>::value
        && usingStdAllocator::value)
-      || !folly::fbv_is_copy_constructible<T>::value
+      || !std::is_copy_constructible<T>::value
     > relocate_use_move;
 
   // move
@@ -741,7 +638,7 @@ private:
   }
 
   void relocate_move_or_memcpy(T* dest, T* first, T* last, std::true_type) {
-    std::memcpy(dest, first, (last - first) * sizeof(T));
+    std::memcpy((void*)dest, (void*)first, (last - first) * sizeof(T));
   }
 
   void relocate_move_or_memcpy(T* dest, T* first, T* last, std::false_type) {
@@ -757,7 +654,7 @@ private:
   }
 
   // done
-  void relocate_done(T* dest, T* first, T* last) noexcept {
+  void relocate_done(T* /*dest*/, T* first, T* last) noexcept {
     if (folly::IsRelocatable<T>::value && usingStdAllocator::value) {
       // used memcpy; data has been relocated, do not call destructor
     } else {
@@ -769,11 +666,11 @@ private:
   void relocate_undo(T* dest, T* first, T* last) noexcept {
     if (folly::IsRelocatable<T>::value && usingStdAllocator::value) {
       // used memcpy, old data is still valid, nothing to do
-    } else if (folly::fbv_is_nothrow_move_constructible<T>::value &&
+    } else if (std::is_nothrow_move_constructible<T>::value &&
                usingStdAllocator::value) {
       // noexcept move everything back, aka relocate_move
       relocate_move(first, dest, dest + (last - first));
-    } else if (!folly::fbv_is_copy_constructible<T>::value) {
+    } else if (!std::is_copy_constructible<T>::value) {
       // weak guarantee
       D_destroy_range_a(dest, dest + (last - first));
     } else {
@@ -803,12 +700,7 @@ public:
   template <class It, class Category = typename
             std::iterator_traits<It>::iterator_category>
   fbvector(It first, It last, const Allocator& a = Allocator())
-    #ifndef FOLLY_FBV_COMPATIBILITY_MODE
     : fbvector(first, last, a, Category()) {}
-    #else
-    : impl_(std::distance(first, last), a)
-    { fbvector_init(first, last, Category()); }
-    #endif
 
   fbvector(const fbvector& other)
     : impl_(other.size(), A::select_on_container_copy_construction(other.impl_))
@@ -817,14 +709,9 @@ public:
   fbvector(fbvector&& other) noexcept : impl_(std::move(other.impl_)) {}
 
   fbvector(const fbvector& other, const Allocator& a)
-    #ifndef FOLLY_FBV_COMPATIBILITY_MODE
     : fbvector(other.begin(), other.end(), a) {}
-    #else
-    : impl_(other.size(), a)
-    { fbvector_init(other.begin(), other.end(), std::forward_iterator_tag()); }
-    #endif
 
-  fbvector(fbvector&& other, const Allocator& a) : impl_(a) {
+  /* may throw */ fbvector(fbvector&& other, const Allocator& a) : impl_(a) {
     if (impl_ == other.impl_) {
       impl_.swapData(other.impl_);
     } else {
@@ -834,12 +721,7 @@ public:
   }
 
   fbvector(std::initializer_list<T> il, const Allocator& a = Allocator())
-    #ifndef FOLLY_FBV_COMPATIBILITY_MODE
     : fbvector(il.begin(), il.end(), a) {}
-    #else
-    : impl_(std::distance(il.begin(), il.end()), a)
-    { fbvector_init(il.begin(), il.end(), std::forward_iterator_tag()); }
-    #endif
 
   ~fbvector() = default; // the cleanup occurs in impl_
 
@@ -908,7 +790,6 @@ public:
 
 private:
 
-  #ifndef FOLLY_FBV_COMPATIBILITY_MODE
   // contract dispatch for iterator types fbvector(It first, It last)
   template <class ForwardIterator>
   fbvector(ForwardIterator first, ForwardIterator last,
@@ -921,21 +802,6 @@ private:
            const Allocator& a, std::input_iterator_tag)
     : impl_(a)
     { for (; first != last; ++first) emplace_back(*first); }
-
-  #else
-  // contract dispatch for iterator types without constructor forwarding
-  template <class ForwardIterator>
-  void
-  fbvector_init(ForwardIterator first, ForwardIterator last,
-                std::forward_iterator_tag)
-    { M_uninitialized_copy_e(first, last); }
-
-  template <class InputIterator>
-  void
-  fbvector_init(InputIterator first, InputIterator last,
-                std::input_iterator_tag)
-    { for (; first != last; ++first) emplace_back(*first); }
-  #endif
 
   // contract dispatch for allocator movement in operator=(fbvector&&)
   void
@@ -955,7 +821,7 @@ private:
   template <class ForwardIterator>
   void assign(ForwardIterator first, ForwardIterator last,
               std::forward_iterator_tag) {
-    auto const newSize = std::distance(first, last);
+    const size_t newSize = std::distance(first, last);
     if (newSize > capacity()) {
       impl_.reset(newSize);
       M_uninitialized_copy_e(first, last);
@@ -1107,10 +973,11 @@ public:
     if (newCap >= oldCap) return;
 
     void* p = impl_.b_;
-    if ((rallocm && usingStdAllocator::value) &&
+    // xallocx() will shrink to precisely newCapacityBytes (which was generated
+    // by goodMallocSize()) if it successfully shrinks in place.
+    if ((usingJEMalloc() && usingStdAllocator::value) &&
         newCapacityBytes >= folly::jemallocMinInPlaceExpandable &&
-        rallocm(&p, nullptr, newCapacityBytes, 0, ALLOCM_NO_MOVE)
-          == ALLOCM_SUCCESS) {
+        xallocx(p, newCapacityBytes, 0, 0) == newCapacityBytes) {
       impl_.z_ += newCap - oldCap;
     } else {
       T* newB; // intentionally uninitialized
@@ -1136,7 +1003,7 @@ public:
 private:
 
   bool reserve_in_place(size_type n) {
-    if (!usingStdAllocator::value || !rallocm) return false;
+    if (!usingStdAllocator::value || !usingJEMalloc()) return false;
 
     // jemalloc can never grow in place blocks smaller than 4096 bytes.
     if ((impl_.z_ - impl_.b_) * sizeof(T) <
@@ -1144,8 +1011,7 @@ private:
 
     auto const newCapacityBytes = folly::goodMallocSize(n * sizeof(T));
     void* p = impl_.b_;
-    if (rallocm(&p, nullptr, newCapacityBytes, 0, ALLOCM_NO_MOVE)
-        == ALLOCM_SUCCESS) {
+    if (xallocx(p, newCapacityBytes, 0, 0) == newCapacityBytes) {
       impl_.z_ = impl_.b_ + newCapacityBytes / sizeof(T);
       return true;
     }
@@ -1277,14 +1143,16 @@ private:
   //
 
   size_type computePushBackCapacity() const {
-    return empty() ? std::max(64 / sizeof(T), size_type(1))
-      : capacity() < folly::jemallocMinInPlaceExpandable / sizeof(T)
-      ? capacity() * 2
-      : sizeof(T) > folly::jemallocMinInPlaceExpandable / 2 && capacity() == 1
-      ? 2
-      : capacity() > 4096 * 32 / sizeof(T)
-      ? capacity() * 2
-      : (capacity() * 3 + 1) / 2;
+    if (capacity() == 0) {
+      return std::max(64 / sizeof(T), size_type(1));
+    }
+    if (capacity() < folly::jemallocMinInPlaceExpandable / sizeof(T)) {
+      return capacity() * 2;
+    }
+    if (capacity() > 4096 * 32 / sizeof(T)) {
+      return capacity() * 2;
+    }
+    return (capacity() * 3 + 1) / 2;
   }
 
   template <class... Args>
@@ -1309,7 +1177,7 @@ public:
         if (folly::IsRelocatable<T>::value && usingStdAllocator::value) {
           D_destroy_range_a((iterator)first, (iterator)last);
           if (last - first >= cend() - last) {
-            std::memcpy((iterator)first, last, (cend() - last) * sizeof(T));
+            std::memcpy((void*)first, (void*)last, (cend() - last) * sizeof(T));
           } else {
             std::memmove((iterator)first, last, (cend() - last) * sizeof(T));
           }
@@ -1400,7 +1268,8 @@ private: // we have the private section first because it defines some macros
     assert(size() + n <= capacity());
     assert(n != 0);
 
-    auto tail = std::distance(position, impl_.e_);
+    // The result is guaranteed to be non-negative, so use an unsigned type:
+    size_type tail = std::distance(position, impl_.e_);
 
     if (tail <= n) {
       relocate_move(position + n, position, impl_.e_);
@@ -1644,17 +1513,17 @@ void fbvector<T, Allocator>::emplace_back_aux(Args&&... args) {
   size_type byte_sz = folly::goodMallocSize(
     computePushBackCapacity() * sizeof(T));
   if (usingStdAllocator::value
-      && rallocm
+      && usingJEMalloc()
       && ((impl_.z_ - impl_.b_) * sizeof(T) >=
           folly::jemallocMinInPlaceExpandable)) {
     // Try to reserve in place.
-    // Ask rallocm to allocate in place at least size()+1 and at most sz space.
-    // rallocm will allocate as much as possible within that range, which
+    // Ask xallocx to allocate in place at least size()+1 and at most sz space.
+    // xallocx will allocate as much as possible within that range, which
     //  is the best possible outcome: if sz space is available, take it all,
     //  otherwise take as much as possible. If nothing is available, then fail.
     // In this fashion, we never relocate if there is a possibility of
-    //  expanding in place, and we never relocate by less than the desired
-    //  amount unless we cannot expand further. Hence we will not relocate
+    //  expanding in place, and we never reallocate by less than the desired
+    //  amount unless we cannot expand further. Hence we will not reallocate
     //  sub-optimally twice in a row (modulo the blocking memory being freed).
     size_type lower = folly::goodMallocSize(sizeof(T) + size() * sizeof(T));
     size_type upper = byte_sz;
@@ -1663,8 +1532,7 @@ void fbvector<T, Allocator>::emplace_back_aux(Args&&... args) {
     void* p = impl_.b_;
     size_t actual;
 
-    if (rallocm(&p, &actual, lower, extra, ALLOCM_NO_MOVE)
-        == ALLOCM_SUCCESS) {
+    if ((actual = xallocx(p, lower, extra, 0)) >= lower) {
       impl_.z_ = impl_.b_ + actual / sizeof(T);
       M_construct(impl_.e_, std::forward<Args>(args)...);
       ++impl_.e_;
@@ -1718,6 +1586,16 @@ void swap(fbvector<T, A>& lhs, fbvector<T, A>& rhs) noexcept {
 //=============================================================================
 //-----------------------------------------------------------------------------
 // other
+
+namespace detail {
+
+// Format support.
+template <class T, class A>
+struct IndexableTraits<fbvector<T, A>>
+  : public IndexableTraitsSeq<fbvector<T, A>> {
+};
+
+}  // namespace detail
 
 template <class T, class A>
 void compactResize(fbvector<T, A>* v, size_t sz) {

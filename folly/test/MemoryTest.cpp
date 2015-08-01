@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-#include "folly/Memory.h"
-#include "folly/Arena.h"
-#include "folly/String.h"
+#include <folly/Memory.h>
+#include <folly/Arena.h>
+#include <folly/String.h>
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
@@ -24,6 +24,13 @@
 #include <type_traits>
 
 using namespace folly;
+
+TEST(shared_ptr, example) {
+  auto uptr = make_unique<std::string>("hello");
+  auto sptr = to_shared_ptr(std::move(uptr));
+  EXPECT_EQ(nullptr, uptr);
+  EXPECT_EQ("hello", *sptr);
+}
 
 template <std::size_t> struct T {};
 template <std::size_t> struct S {};

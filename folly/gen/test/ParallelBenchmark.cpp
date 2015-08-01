@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,9 @@
 #include <vector>
 #include <future>
 
-#include "folly/gen/Base.h"
-#include "folly/gen/Parallel.h"
-#include "folly/gen/test/Bench.h"
+#include <folly/gen/Base.h>
+#include <folly/gen/Parallel.h>
+#include <folly/gen/test/Bench.h>
 
 
 DEFINE_int32(threads,
@@ -56,10 +56,10 @@ static auto primes =
     seq(1, 1 << 20) | filter(isPrimeSlow) | as<vector>();
 
 static auto isPrime = [](int n) {
-  return !(from(primes)
+  return from(primes)
          | until([&](int d) { return d * d > n; })
          | filter([&](int d) { return 0 == n % d; })
-         | any);
+         | isEmpty;
 };
 
 static auto factors = [](int n) {
@@ -173,7 +173,7 @@ seq(1, fibs) | parallel(map([](int) { return fi 1698.07%    87.96ms    11.37
 ============================================================================
 #endif
 int main(int argc, char *argv[]) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::runBenchmarks();
   return 0;
 }

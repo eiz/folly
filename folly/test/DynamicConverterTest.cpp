@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 // @author Nicholas Ormrod <njormrod@fb.com>
 
-#include "folly/DynamicConverter.h"
+#include <folly/DynamicConverter.h>
 
 #include <algorithm>
 #include <gflags/gflags.h>
@@ -24,7 +24,7 @@
 #include <map>
 #include <vector>
 
-#include "folly/Benchmark.h"
+#include <folly/Benchmark.h>
 
 using namespace folly;
 using namespace folly::dynamicconverter_detail;
@@ -35,17 +35,21 @@ TEST(DynamicConverter, template_metaprogramming) {
   bool c1f = is_container<int>::value;
   bool c2f = is_container<std::pair<int, int>>::value;
   bool c3f = is_container<A>::value;
+  bool c4f = class_is_container<A>::value;
 
   bool c1t = is_container<std::vector<int>>::value;
   bool c2t = is_container<std::set<int>>::value;
   bool c3t = is_container<std::map<int, int>>::value;
+  bool c4t = class_is_container<std::vector<A>>::value;
 
   EXPECT_EQ(c1f, false);
   EXPECT_EQ(c2f, false);
   EXPECT_EQ(c3f, false);
+  EXPECT_EQ(c4f, false);
   EXPECT_EQ(c1t, true);
   EXPECT_EQ(c2t, true);
   EXPECT_EQ(c3t, true);
+  EXPECT_EQ(c4t, true);
 
 
   bool m1f = is_map<int>::value;
@@ -239,7 +243,7 @@ TEST(DynamicConverter, crazy) {
   dynamic
     dv1 = {},
     dv2 = { ds1, ds2 },
-    dv3 = { ds3 };
+    dv3({ ds3 });
 
   dynamic
     dm1 = dynamic::object(true, dv1)(false, dv2),
@@ -363,10 +367,9 @@ TEST(DynamicConverter, errors) {
 
 int main(int argc, char ** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   if (FLAGS_benchmark) {
     folly::runBenchmarks();
   }
   return RUN_ALL_TESTS();
 }
-

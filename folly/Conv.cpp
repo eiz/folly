@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 #define FOLLY_CONV_INTERNAL
-#include "folly/Conv.h"
+#include <folly/Conv.h>
 
 namespace folly {
 namespace detail {
@@ -46,8 +46,7 @@ static_assert(sizeof(unsigned long long) >= 8,
               "Wrong value for MaxString<unsigned long long>::value"
               ", please update.");
 
-/* Test for GCC >= 3.6.0 */
-#if __GNUC__ > 3 || (__GNUC__ == 3 && (__GNUC_MINOR__ >= 6))
+#ifdef FOLLY_HAVE_INT128_T
 template <> const char *const MaxString<__uint128_t>::value =
   "340282366920938463463374607431768211455";
 #endif
@@ -72,8 +71,8 @@ inline bool bool_str_cmp(const char** b, size_t len, const char* value) {
 bool str_to_bool(StringPiece* src) {
   auto b = src->begin(), e = src->end();
   for (;; ++b) {
-    FOLLY_RANGE_CHECK(b < e,
-                      "No non-whitespace characters found in input string");
+    FOLLY_RANGE_CHECK_STRINGPIECE(
+      b < e, "No non-whitespace characters found in input string", *src);
     if (!isspace(*b)) break;
   }
 
@@ -82,14 +81,13 @@ bool str_to_bool(StringPiece* src) {
   switch (*b) {
     case '0':
     case '1': {
-      // Attempt to parse the value as an integer
-      StringPiece tmp(*src);
-      uint8_t value = to<uint8_t>(&tmp);
-      // Only accept 0 or 1
-      FOLLY_RANGE_CHECK(value <= 1,
-                        "Integer overflow when parsing bool: must be 0 or 1");
-      b = tmp.begin();
-      result = (value == 1);
+      result = false;
+      for (; b < e && isdigit(*b); ++b) {
+        FOLLY_RANGE_CHECK_STRINGPIECE(
+          !result && (*b == '0' || *b == '1'),
+          "Integer overflow when parsing bool: must be 0 or 1", *src);
+        result = (*b == '1');
+      }
       break;
     }
     case 'y':
@@ -127,11 +125,11 @@ bool str_to_bool(StringPiece* src) {
       } else if (bool_str_cmp(&b, len, "off")) {
         result = false;
       } else {
-        FOLLY_RANGE_CHECK(false, "Invalid value for bool");
+        FOLLY_RANGE_CHECK_STRINGPIECE(false, "Invalid value for bool", *src);
       }
       break;
     default:
-      FOLLY_RANGE_CHECK(false, "Invalid value for bool");
+      FOLLY_RANGE_CHECK_STRINGPIECE(false, "Invalid value for bool", *src);
   }
 
   src->assign(b, e);

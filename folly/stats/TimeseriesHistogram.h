@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@
 
 #include <string>
 #include <boost/static_assert.hpp>
-#include "folly/stats/Histogram.h"
-#include "folly/stats/MultiLevelTimeSeries.h"
+#include <folly/stats/Histogram.h>
+#include <folly/stats/MultiLevelTimeSeries.h>
 
 namespace folly {
 
@@ -118,7 +118,7 @@ class TimeseriesHistogram {
   /* Total count of values at the given timeseries level (all buckets). */
   int64_t count(int level) const {
     int64_t total = 0;
-    for (int b = 0; b < buckets_.getNumBuckets(); ++b) {
+    for (unsigned int b = 0; b < buckets_.getNumBuckets(); ++b) {
       total += buckets_.getByIndex(b).count(level);
     }
     return total;
@@ -127,7 +127,7 @@ class TimeseriesHistogram {
   /* Total count of values added during the given interval (all buckets). */
   int64_t count(TimeType start, TimeType end) const {
     int64_t total = 0;
-    for (int b = 0; b < buckets_.getNumBuckets(); ++b) {
+    for (unsigned int b = 0; b < buckets_.getNumBuckets(); ++b) {
       total += buckets_.getByIndex(b).count(start, end);
     }
     return total;
@@ -136,7 +136,7 @@ class TimeseriesHistogram {
   /* Total sum of values at the given timeseries level (all buckets). */
   ValueType sum(int level) const {
     ValueType total = ValueType();
-    for (int b = 0; b < buckets_.getNumBuckets(); ++b) {
+    for (unsigned int b = 0; b < buckets_.getNumBuckets(); ++b) {
       total += buckets_.getByIndex(b).sum(level);
     }
     return total;
@@ -145,7 +145,7 @@ class TimeseriesHistogram {
   /* Total sum of values added during the given interval (all buckets). */
   ValueType sum(TimeType start, TimeType end) const {
     ValueType total = ValueType();
-    for (int b = 0; b < buckets_.getNumBuckets(); ++b) {
+    for (unsigned int b = 0; b < buckets_.getNumBuckets(); ++b) {
       total += buckets_.getByIndex(b).sum(start, end);
     }
     return total;

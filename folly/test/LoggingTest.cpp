@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Facebook, Inc.
+ * Copyright 2015 Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ TEST(LogEveryMs, basic) {
   }
 
   bool atLeastOneIsGood = false;
-  for (int i = 0; i < hist.size() - 1; ++i) {
+  for (size_t i = 0; i < hist.size() - 1; ++i) {
     auto delta = hist[i + 1] - hist[i];
     if (delta > std::chrono::milliseconds(5) &&
         delta < std::chrono::milliseconds(15)) {
@@ -38,6 +38,17 @@ TEST(LogEveryMs, basic) {
     }
   }
   EXPECT_TRUE(atLeastOneIsGood);
+}
+
+TEST(LogEveryMs, zero) {
+  int count = 0;
+
+  for (int i = 0; i < 10; ++i) {
+    FB_LOG_EVERY_MS(INFO, 0)
+      << "test msg " << ++count;
+  }
+
+  EXPECT_EQ(10, count);
 }
 
 BENCHMARK(skip_overhead, iter) {
@@ -71,7 +82,7 @@ BENCHMARK(dev_null_log_overhead, iter) {
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-  google::ParseCommandLineFlags(&argc, &argv, true);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   auto rv = RUN_ALL_TESTS();
   if (!rv && FLAGS_benchmark) {
