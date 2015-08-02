@@ -337,6 +337,7 @@ inline size_t malloc_usable_size(void* ptr) {
 
 #ifdef _MSC_VER
 # include <intrin.h>
+# include <inttypes.h>
 #endif
 
 namespace folly {

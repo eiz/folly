@@ -25,7 +25,9 @@
 #include <cstring>
 #include <memory>
 #include <limits>
+#if defined(HAVE_SYS_UIO)
 #include <sys/uio.h>
+#endif
 #include <type_traits>
 
 #include <boost/iterator/iterator_facade.hpp>

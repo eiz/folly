@@ -18,6 +18,6 @@
 
 namespace folly { namespace detail {
 
-FOLLY_VERSION_CHECK(folly, FOLLY_VERSION)
+FOLLY_VERSION_CHECK(folly, "hax")
 
 }}  // namespaces

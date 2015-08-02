@@ -27,7 +27,10 @@
 #endif
 
 #include <fcntl.h>
+#if defined(HAVE_SYS_MMAN)
 #include <sys/mman.h>
+#endif
+
 #include <sys/types.h>
 #include <system_error>
 #include <gflags/gflags.h>

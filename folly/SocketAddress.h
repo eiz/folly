@@ -17,10 +17,12 @@
 #pragma once
 
 #include <sys/types.h>
+#if defined(__unix__)
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#endif
 #include <cstddef>
 #include <iostream>
 #include <string>
@@ -79,15 +81,22 @@ class SocketAddress {
 
   SocketAddress(const SocketAddress& addr) {
     port_ = addr.port_;
+#if defined(__unix__)
     if (addr.getFamily() == AF_UNIX) {
       storage_.un.init(addr.storage_.un);
     } else {
+#else
+    {
+#endif
       storage_ = addr.storage_;
     }
     external_ = addr.external_;
   }
 
   SocketAddress& operator=(const SocketAddress& addr) {
+#if !defined(__unix__)
+  storage_ = addr.storage_;
+#else
     if (!external_) {
       if (addr.getFamily() != AF_UNIX) {
         storage_ = addr.storage_;
@@ -103,6 +112,7 @@ class SocketAddress {
         storage_ = addr.storage_;
       }
     }
+#endif
     port_ = addr.port_;
     external_ = addr.external_;
     return *this;
@@ -123,9 +133,11 @@ class SocketAddress {
   }
 
   ~SocketAddress() {
+#if defined(__unix__)
     if (external_) {
       storage_.un.free();
     }
+#endif
   }
 
   bool isInitialized() const {
@@ -363,12 +375,16 @@ class SocketAddress {
    * Returns the actual size of the storage used.
    */
   socklen_t getAddress(sockaddr_storage* addr) const {
+#if !defined(__unix__)
+    return storage_.addr.toSockaddrStorage(addr, htons(port_));
+#else
     if (!external_) {
       return storage_.addr.toSockaddrStorage(addr, htons(port_));
     } else {
       memcpy(addr, storage_.un.addr, sizeof(*storage_.un.addr));
       return storage_.un.len;
     }
+#endif
   }
 
   const folly::IPAddress& getIPAddress() const;
@@ -510,6 +526,7 @@ class SocketAddress {
   size_t hash() const;
 
  private:
+#if defined(__unix__)
   /**
    * Unix socket addresses require more storage than IPv4 and IPv6 addresses,
    * and are comparatively little-used.
@@ -558,6 +575,7 @@ class SocketAddress {
       magic = 0;
     }
   };
+#endif
 
   // a typedef that allow us to compile against both winsock & POSIX sockets:
   // (both arg types and calling conventions differ for both)
@@ -578,6 +596,7 @@ class SocketAddress {
   void updateUnixAddressLength(socklen_t addrlen);
 
   void prepFamilyChange(sa_family_t newFamily) {
+#if defined(__unix__)
     if (newFamily != AF_UNIX) {
       if (external_) {
         storage_.un.free();
@@ -590,6 +609,7 @@ class SocketAddress {
       }
       external_ = true;
     }
+#endif
   }
 
   /*
@@ -599,10 +619,14 @@ class SocketAddress {
    * If we need to store a Unix socket address, ExternalUnixAddr is a shim to
    * track a struct sockaddr_un allocated separately on the heap.
    */
+#if defined(__unix__)
   union {
     folly::IPAddress addr{};
     ExternalUnixAddr un;
   } storage_{};
+#else
+  struct { folly::IPAddress addr{}; } storage_{};
+#endif
   // IPAddress class does nto save zone or port, and must be saved here
   uint16_t port_;
 

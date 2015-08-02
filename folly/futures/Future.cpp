@@ -14,7 +14,13 @@
  * limitations under the License.
  */
 #include <folly/futures/Future.h>
+
+#if defined(__unix__)
 #include <folly/futures/detail/ThreadWheelTimekeeper.h>
+#else
+#include <folly/futures/detail/PriorityQueueTimekeeper.h>
+#endif
+
 #include <folly/Likely.h>
 
 namespace folly {
@@ -33,7 +39,11 @@ namespace folly { namespace futures {
 
 Future<Unit> sleep(Duration dur, Timekeeper* tk) {
   if (LIKELY(!tk)) {
+#if defined(__unix__)
     tk = folly::detail::getTimekeeperSingleton();
+#else
+    tk = folly::detail::getPortableTimekeeperSingleton();
+#endif
   }
   return tk->after(dur);
 }

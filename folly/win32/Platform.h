@@ -20,6 +20,10 @@
 #include <folly/Portability.h>
 #include <folly/Preprocessor.h>
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -89,7 +93,7 @@ inline HANDLE stdinHandle()
   return GetStdHandle(STD_INPUT_HANDLE);
 }
 
-HANDLE open(const char *name, int flags, mode_t mode)
+inline HANDLE open(const char *name, int flags, mode_t mode)
 {
   // TODO: mode is currently ignored.
   // TODO: directories
@@ -127,29 +131,28 @@ HANDLE open(const char *name, int flags, mode_t mode)
   return result;
 }
 
-int close(HANDLE handle)
+inline int close(HANDLE handle)
 {
   // TODO: set errno on failure
   return CloseHandle(handle) ? 0 : -1;
 }
 
-HANDLE dup(HANDLE handle)
+inline HANDLE dup(HANDLE handle)
 {
   return kInvalidHandle;
 }
 
-HANDLE fileno(FILE *fp)
+inline HANDLE fileno(FILE *fp)
 {
   return kInvalidHandle;
 }
 
-int fsync(HANDLE handle)
+inline int fsync(HANDLE handle)
 {
-  return 0; // yolo
+  return 0;
 }
 
-}
-
+} // namespace platform
 } // namespace folly
 
 struct iovec

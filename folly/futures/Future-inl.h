@@ -34,6 +34,7 @@ class Timekeeper;
 
 namespace detail {
   Timekeeper* getTimekeeperSingleton();
+  Timekeeper* getPortableTimekeeperSingleton();
 }
 
 template <class T>
@@ -848,7 +849,7 @@ Future<T> unorderedReduce(It first, It last, T initial, F func) {
 }
 
 // within
-
+/*
 template <class T>
 Future<T> Future<T>::within(Duration dur, Timekeeper* tk) {
   return within(dur, TimedOut(), tk);
@@ -867,7 +868,11 @@ Future<T> Future<T>::within(Duration dur, E e, Timekeeper* tk) {
   };
 
   if (!tk) {
+#if defined(__unix__)
     tk = folly::detail::getTimekeeperSingleton();
+#else
+    tk = folly::detail::getPortableTimekeeperSingleton();
+#endif
   }
 
   auto ctx = std::make_shared<Context>(std::move(e));
@@ -893,7 +898,7 @@ Future<T> Future<T>::within(Duration dur, E e, Timekeeper* tk) {
 
   return ctx->promise.getFuture().via(getExecutor());
 }
-
+*/
 // delayed
 
 template <class T>

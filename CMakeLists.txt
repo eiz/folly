@@ -24,11 +24,17 @@ file(GLOB Folly_SOURCES folly/*.cpp)
 list(REMOVE_ITEM Folly_SOURCES
     ${CMAKE_SOURCE_DIR}/folly/LifoSem.cpp
     ${CMAKE_SOURCE_DIR}/folly/Benchmark.cpp
+    ${CMAKE_SOURCE_DIR}/folly/MemoryMapping.cpp
+    ${CMAKE_SOURCE_DIR}/folly/SingletonStackTrace.cpp
+    ${CMAKE_SOURCE_DIR}/folly/Subprocess.cpp
     ${CMAKE_SOURCE_DIR}/folly/TimeoutQueue.cpp)
 list(REMOVE_ITEM Folly_HEADERS
     ${CMAKE_SOURCE_DIR}/folly/LifoSem.h
     ${CMAKE_SOURCE_DIR}/folly/IndexedMemPool.h
     ${CMAKE_SOURCE_DIR}/folly/Benchmark.h
+    ${CMAKE_SOURCE_DIR}/folly/MemoryMapping.h
+    ${CMAKE_SOURCE_DIR}/folly/SingletonStackTrace.h
+    ${CMAKE_SOURCE_DIR}/folly/Subprocess.h
     ${CMAKE_SOURCE_DIR}/folly/TimeoutQueue.h)
 
 # /folly/detail (without malloc if weak symbols, without futex if not linux,
@@ -79,7 +85,14 @@ endif()
 
 # /folly/futures
 file(GLOB Folly_futures_SOURCES folly/futures/*.cpp folly/futures/detail/*.cpp)
-file(GLOB Folly_futures_HEADERS folly/futures/*.hpp folly/futures/detail/*.h)
+file(GLOB Folly_futures_HEADERS folly/futures/*.h folly/futures/detail/*.h)
+
+
+list(REMOVE_ITEM Folly_futures_SOURCES
+    ${CMAKE_SOURCE_DIR}/folly/futures/detail/ThreadWheelTimekeeper.cpp)
+list(REMOVE_ITEM Folly_futures_HEADERS
+    ${CMAKE_SOURCE_DIR}/folly/futures/detail/ThreadWheelTimekeeper.h)
+
 
 # /folly/gen
 file(GLOB Folly_gen_SOURCES folly/gen/*.cpp)
@@ -88,6 +101,14 @@ file(GLOB Folly_gen_HEADERS folly/gen/*.h)
 # /folly/io
 file(GLOB Folly_io_HEADERS folly/io/*.h)
 file(GLOB Folly_io_SOURCES folly/io/*.cpp)
+
+list(REMOVE_ITEM Folly_io_SOURCES
+    ${CMAKE_SOURCE_DIR}/folly/io/ShutdownSocketSet.cpp
+    ${CMAKE_SOURCE_DIR}/folly/io/RecordIO.cpp)
+list(REMOVE_ITEM Folly_io_HEADERS
+    ${CMAKE_SOURCE_DIR}/folly/io/ShutdownSocketSet.h
+    ${CMAKE_SOURCE_DIR}/folly/io/RecordIO.h)
+
 # /folly/io/async
 file(GLOB Folly_ioasync_HEADERS folly/io/async/*.h)
 file(GLOB Folly_ioasync_SOURCES folly/io/async/*.cpp)
@@ -114,7 +135,7 @@ source_group("Source Files\\Windows" FILES ${Folly_win32_SOURCES})
 
 # libfolly library
 if(MSVC)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4800")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4800 /bigobj")
 endif()
 
 add_library(libfolly STATIC ${Folly_SOURCES} ${Folly_HEADERS}
