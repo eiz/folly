@@ -17,10 +17,14 @@
 #include <folly/Random.h>
 
 #include <atomic>
+
 #if defined(__unix__)
 #include <unistd.h>
 #include <sys/time.h>
+#elif defined(_WIN32)
+#include <wincrypt.h>
 #endif
+
 #include <random>
 #include <array>
 
@@ -32,6 +36,7 @@ namespace folly {
 
 namespace {
 
+#if defined(__unix__)
 void readRandomDevice(void* data, size_t size) {
   // Keep the random device open for the duration of the program.
   static int randomFd = ::open("/dev/urandom", O_RDONLY);
@@ -39,6 +44,31 @@ void readRandomDevice(void* data, size_t size) {
   auto bytesRead = readFull(randomFd, data, size);
   PCHECK(bytesRead >= 0 && size_t(bytesRead) == size);
 }
+#elif defined(_WIN32)
+static HCRYPTPROV getCryptoProvider() {
+  HCRYPTPROV provider;
+
+  PCHECK(SUCCEEDED(CryptAcquireContext(
+    &provider, nullptr, nullptr, PROV_RSA_FULL,
+    CRYPT_VERIFYCONTEXT | CRYPT_SILENT)));
+  return provider;
+}
+
+void readRandomDevice(void* data, size_t size) {
+  static HCRYPTPROV provider = getCryptoProvider();
+  BYTE *ptr = (BYTE *)data;
+
+  while (size > 0) {
+    DWORD nread = (DWORD)size;
+
+    PCHECK(CryptGenRandom(provider, nread, ptr));
+    size -= nread;
+    ptr += nread;
+  }
+}
+#else
+#error Sorry
+#endif
 
 class BufferedRandomDevice {
  public:

@@ -20,8 +20,11 @@
 #ifdef __APPLE__
 #include <fcntl.h>
 #endif
+
+#if defined(__unix__)
 #include <sys/file.h>
 #include <sys/socket.h>
+#endif
 
 #include <folly/detail/FileUtilDetail.h>
 
@@ -29,12 +32,18 @@ namespace folly {
 
 using namespace fileutil_detail;
 
-int openNoInt(const char* name, int flags, mode_t mode) {
-  return wrapNoInt(open, name, flags, mode);
+platform::Handle openNoInt(const char* name, int flags, mode_t mode) {
+  platform::Handle fd;
+
+  do {
+    fd = platform::open(name, flags, mode);
+  } while (fd == platform::kInvalidHandle && errno == EINTR);
+
+  return fd;
 }
 
-int closeNoInt(int fd) {
-  int r = close(fd);
+int closeNoInt(platform::Handle fd) {
+  int r = platform::close(fd);
   // Ignore EINTR.  On Linux, close() may only return EINTR after the file
   // descriptor has been closed, so you must not retry close() on EINTR --
   // in the best case, you'll get EBADF, and in the worst case, you'll end up
@@ -50,29 +59,38 @@ int closeNoInt(int fd) {
   return r;
 }
 
-int fsyncNoInt(int fd) {
-  return wrapNoInt(fsync, fd);
+int fsyncNoInt(platform::Handle fd) {
+  return wrapNoInt(platform::fsync, fd);
 }
 
-int dupNoInt(int fd) {
-  return wrapNoInt(dup, fd);
+platform::Handle dupNoInt(platform::Handle fd) {
+  platform::Handle nfd;
+
+  do {
+    nfd = platform::dup(fd);
+  } while (nfd == platform::kInvalidHandle && errno == EINTR);
+
+  return nfd;
 }
 
+#if defined(HAVE_DUP2)
 int dup2NoInt(int oldfd, int newfd) {
   return wrapNoInt(dup2, oldfd, newfd);
 }
+#endif
 
-int fdatasyncNoInt(int fd) {
+#if defined(BROKEN_STUFF)
+int fdatasyncNoInt(platform::Handle fd) {
 #if defined(__APPLE__)
   return wrapNoInt(fcntl, fd, F_FULLFSYNC);
 #elif defined(__FreeBSD__) || defined(_MSC_VER)
-  return wrapNoInt(fsync, fd);
+  return wrapNoInt(platform::fsync, fd);
 #else
   return wrapNoInt(fdatasync, fd);
 #endif
 }
 
-int ftruncateNoInt(int fd, off_t len) {
+int ftruncateNoInt(platform::Handle fd, off_t len) {
   return wrapNoInt(ftruncate, fd, len);
 }
 
@@ -80,72 +98,73 @@ int truncateNoInt(const char* path, off_t len) {
   return wrapNoInt(truncate, path, len);
 }
 
-int flockNoInt(int fd, int operation) {
+int flockNoInt(platform::Handle fd, int operation) {
   return wrapNoInt(flock, fd, operation);
 }
 
-int shutdownNoInt(int fd, int how) {
+int shutdownNoInt(platform::Handle fd, int how) {
   return wrapNoInt(shutdown, fd, how);
 }
 
-ssize_t readNoInt(int fd, void* buf, size_t count) {
+ssize_t readNoInt(platform::Handle fd, void* buf, size_t count) {
   return wrapNoInt(read, fd, buf, count);
 }
 
-ssize_t preadNoInt(int fd, void* buf, size_t count, off_t offset) {
+ssize_t preadNoInt(platform::Handle fd, void* buf, size_t count, off_t offset) {
   return wrapNoInt(pread, fd, buf, count, offset);
 }
 
-ssize_t readvNoInt(int fd, const iovec* iov, int count) {
+ssize_t readvNoInt(platform::Handle fd, const iovec* iov, int count) {
   return wrapNoInt(writev, fd, iov, count);
 }
 
-ssize_t writeNoInt(int fd, const void* buf, size_t count) {
+ssize_t writeNoInt(platform::Handle fd, const void* buf, size_t count) {
   return wrapNoInt(write, fd, buf, count);
 }
 
-ssize_t pwriteNoInt(int fd, const void* buf, size_t count, off_t offset) {
+ssize_t pwriteNoInt(platform::Handle fd, const void* buf, size_t count, off_t offset) {
   return wrapNoInt(pwrite, fd, buf, count, offset);
 }
 
-ssize_t writevNoInt(int fd, const iovec* iov, int count) {
+ssize_t writevNoInt(platform::Handle fd , const iovec* iov, int count) {
   return wrapNoInt(writev, fd, iov, count);
 }
 
-ssize_t readFull(int fd, void* buf, size_t count) {
+ssize_t readFull(platform::Handle fd, void* buf, size_t count) {
   return wrapFull(read, fd, buf, count);
 }
 
-ssize_t preadFull(int fd, void* buf, size_t count, off_t offset) {
+ssize_t preadFull(platform::Handle fd, void* buf, size_t count, off_t offset) {
   return wrapFull(pread, fd, buf, count, offset);
 }
 
-ssize_t writeFull(int fd, const void* buf, size_t count) {
+ssize_t writeFull(platform::Handle fd, const void* buf, size_t count) {
   return wrapFull(write, fd, const_cast<void*>(buf), count);
 }
 
-ssize_t pwriteFull(int fd, const void* buf, size_t count, off_t offset) {
+ssize_t pwriteFull(platform::Handle fd, const void* buf, size_t count, off_t offset) {
   return wrapFull(pwrite, fd, const_cast<void*>(buf), count, offset);
 }
 
-ssize_t readvFull(int fd, iovec* iov, int count) {
+ssize_t readvFull(platform::Handle fd, iovec* iov, int count) {
   return wrapvFull(readv, fd, iov, count);
 }
 
 #if FOLLY_HAVE_PREADV
-ssize_t preadvFull(int fd, iovec* iov, int count, off_t offset) {
+ssize_t preadvFull(platform::Handle fd, iovec* iov, int count, off_t offset) {
   return wrapvFull(preadv, fd, iov, count, offset);
 }
 #endif
 
-ssize_t writevFull(int fd, iovec* iov, int count) {
+ssize_t writevFull(platform::Handle fd, iovec* iov, int count) {
   return wrapvFull(writev, fd, iov, count);
 }
 
 #if FOLLY_HAVE_PWRITEV
-ssize_t pwritevFull(int fd, iovec* iov, int count, off_t offset) {
+ssize_t pwritevFull(platform::Handle fd, iovec* iov, int count, off_t offset) {
   return wrapvFull(pwritev, fd, iov, count, offset);
 }
+#endif
 #endif
 
 }  // namespaces

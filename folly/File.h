@@ -36,8 +36,6 @@ namespace folly {
  */
 class File {
  public:
-  using HandleType = folly::platform::HandleType;
-
   /**
    * Creates an empty File object, for late initialization.
    */
@@ -47,7 +45,7 @@ class File {
    * Create a File object from an existing file descriptor.
    * Takes ownership of the file descriptor if ownsFd is true.
    */
-  explicit File(int fd, bool ownsFd = false);
+  explicit File(platform::Handle fd, bool ownsFd = false);
 
   /**
    * Open and create a file object.  Throws on error.
@@ -67,13 +65,13 @@ class File {
   /**
    * Return the file descriptor, or -1 if the file was closed.
    */
-  int fd() const { return fd_; }
+  platform::Handle fd() const { return fd_; }
 
   /**
    * Returns 'true' iff the file was successfully opened.
    */
   explicit operator bool() const {
-    return fd_ != -1;
+    return fd_ != platform::kInvalidHandle;
   }
 
   /**
@@ -95,9 +93,9 @@ class File {
 
   /**
    * Returns and releases the file descriptor; no longer owned by this File.
-   * Returns -1 if the File object didn't wrap a file.
+   * Returns platform::kInvalidHandle if the File object didn't wrap a file.
    */
-  int release() noexcept;
+  platform::Handle release() noexcept;
 
   /**
    * Swap this File with another.
@@ -108,6 +106,7 @@ class File {
   File(File&&) noexcept;
   File& operator=(File&&);
 
+#if defined(HAVE_FLOCK)
   // FLOCK (INTERPROCESS) LOCKS
   //
   // NOTE THAT THESE LOCKS ARE flock() LOCKS.  That is, they may only be used
@@ -127,12 +126,15 @@ class File {
  private:
   void doLock(int op);
   bool doTryLock(int op);
+#else
+private:
+#endif
 
   // unique
   File(const File&) = delete;
   File& operator=(const File&) = delete;
 
-  int fd_;
+  platform::Handle fd_;
   bool ownsFd_;
 };
 

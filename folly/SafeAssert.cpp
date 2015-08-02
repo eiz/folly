@@ -23,7 +23,7 @@ namespace folly { namespace detail {
 
 namespace {
 void writeStderr(const char* s) {
-  writeFull(STDERR_FILENO, s, strlen(s));
+  writeFull(platform::stderrHandle(), s, strlen(s));
 }
 }  // namespace
 
@@ -38,11 +38,11 @@ void assertionFailure(const char* expr, const char* msg, const char* file,
   writeStderr("\nLine: ");
   char buf[20];
   uint32_t n = uint64ToBufferUnsafe(line, buf);
-  writeFull(STDERR_FILENO, buf, n);
+  writeFull(platform::stderrHandle(), buf, n);
   writeStderr("\nFunction: ");
   writeStderr(function);
   writeStderr("\n");
-  fsyncNoInt(STDERR_FILENO);
+  fsyncNoInt(platform::stderrHandle());
   abort();
 }
 

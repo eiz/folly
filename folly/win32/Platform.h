@@ -24,6 +24,8 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
+#include <cstdio>
+#include <fcntl.h>
 #include <Windows.h>
 #include <intrin.h>
 
@@ -68,23 +70,32 @@ typedef DWORD pid_t;
 typedef DWORD mode_t;
 
 namespace platform {
-using HandleType = HANDLE;
+using Handle = HANDLE;
 
-#define O_RDONLY 00000000
-#define O_WRONLY 00000001
-#define O_RDWR   00000002
-#define O_CREAT  00000100
-#define O_EXCL   00000200
-#define O_TRUNC  00001000
-#define O_APPEND 00020000
+constexpr HANDLE kInvalidHandle = INVALID_HANDLE_VALUE;
 
-HANDLE platformOpen(const char *name, int flags, mode_t mode)
+inline HANDLE stdoutHandle()
+{
+  return GetStdHandle(STD_OUTPUT_HANDLE);
+}
+
+inline HANDLE stderrHandle()
+{
+  return GetStdHandle(STD_ERROR_HANDLE);
+}
+
+inline HANDLE stdinHandle()
+{
+  return GetStdHandle(STD_INPUT_HANDLE);
+}
+
+HANDLE open(const char *name, int flags, mode_t mode)
 {
   // TODO: mode is currently ignored.
   // TODO: directories
   // TODO: is there suitably licensed, minimal code that already does this?
   //       no cygwin or mingw stuff allowed.
-  // TODO: error reporting unity
+  // TODO: error reporting unity / errno
   DWORD desiredAccess = 0, creationDisposition = 0;
 
   if (flags & O_RDONLY) {
@@ -116,8 +127,35 @@ HANDLE platformOpen(const char *name, int flags, mode_t mode)
   return result;
 }
 
+int close(HANDLE handle)
+{
+  // TODO: set errno on failure
+  return CloseHandle(handle) ? 0 : -1;
+}
+
+HANDLE dup(HANDLE handle)
+{
+  return kInvalidHandle;
+}
+
+HANDLE fileno(FILE *fp)
+{
+  return kInvalidHandle;
+}
+
+int fsync(HANDLE handle)
+{
+  return 0; // yolo
+}
+
 }
 
 } // namespace folly
+
+struct iovec
+{
+  void *iov_base;
+  size_t iov_len;
+};
 
 #endif // FOLLY_WIN32_PLATFORM_H_

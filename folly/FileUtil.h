@@ -44,24 +44,25 @@ namespace folly {
  * until all data is written.  Note that *Full wrappers weaken the thread
  * semantics of underlying system calls.
  */
-int openNoInt(const char* name, int flags, mode_t mode = 0666);
-int closeNoInt(int fd);
-int dupNoInt(int fd);
+platform::Handle openNoInt(
+  const char* name, int flags, mode_t mode = 0666);
+int closeNoInt(platform::Handle fd);
+platform::Handle dupNoInt(platform::Handle fd);
 int dup2NoInt(int oldfd, int newfd);
-int fsyncNoInt(int fd);
-int fdatasyncNoInt(int fd);
-int ftruncateNoInt(int fd, off_t len);
+int fsyncNoInt(platform::Handle fd);
+int fdatasyncNoInt(platform::Handle fd);
+int ftruncateNoInt(platform::Handle fd, off_t len);
 int truncateNoInt(const char* path, off_t len);
-int flockNoInt(int fd, int operation);
-int shutdownNoInt(int fd, int how);
+int flockNoInt(platform::Handle fd, int operation);
+int shutdownNoInt(platform::Handle fd, int how);
 
-ssize_t readNoInt(int fd, void* buf, size_t n);
-ssize_t preadNoInt(int fd, void* buf, size_t n, off_t offset);
-ssize_t readvNoInt(int fd, const iovec* iov, int count);
+ssize_t readNoInt(platform::Handle fd, void* buf, size_t n);
+ssize_t preadNoInt(platform::Handle fd, void* buf, size_t n, off_t offset);
+ssize_t readvNoInt(platform::Handle fd, const iovec* iov, int count);
 
-ssize_t writeNoInt(int fd, const void* buf, size_t n);
-ssize_t pwriteNoInt(int fd, const void* buf, size_t n, off_t offset);
-ssize_t writevNoInt(int fd, const iovec* iov, int count);
+ssize_t writeNoInt(platform::Handle fd, const void* buf, size_t n);
+ssize_t pwriteNoInt(platform::Handle fd, const void* buf, size_t n, off_t offset);
+ssize_t writevNoInt(platform::Handle fd, const iovec* iov, int count);
 
 /**
  * Wrapper around read() (and pread()) that, in addition to retrying on
@@ -85,11 +86,11 @@ ssize_t writevNoInt(int fd, const iovec* iov, int count);
  * readv and preadv.  The contents of iov after these functions return
  * is unspecified.
  */
-ssize_t readFull(int fd, void* buf, size_t n);
-ssize_t preadFull(int fd, void* buf, size_t n, off_t offset);
-ssize_t readvFull(int fd, iovec* iov, int count);
+ssize_t readFull(platform::Handle fd, void* buf, size_t n);
+ssize_t preadFull(platform::Handle fd, void* buf, size_t n, off_t offset);
+ssize_t readvFull(platform::Handle fd, iovec* iov, int count);
 #if FOLLY_HAVE_PREADV
-ssize_t preadvFull(int fd, iovec* iov, int count, off_t offset);
+ssize_t preadvFull(platform::Handle fd, iovec* iov, int count, off_t offset);
 #endif
 
 /**
@@ -106,11 +107,11 @@ ssize_t preadvFull(int fd, iovec* iov, int count, off_t offset);
  * writev and pwritev.  The contents of iov after these functions return
  * is unspecified.
  */
-ssize_t writeFull(int fd, const void* buf, size_t n);
-ssize_t pwriteFull(int fd, const void* buf, size_t n, off_t offset);
-ssize_t writevFull(int fd, iovec* iov, int count);
+ssize_t writeFull(platform::Handle fd, const void* buf, size_t n);
+ssize_t pwriteFull(platform::Handle fd, const void* buf, size_t n, off_t offset);
+ssize_t writevFull(platform::Handle fd, iovec* iov, int count);
 #if FOLLY_HAVE_PWRITEV
-ssize_t pwritevFull(int fd, iovec* iov, int count, off_t offset);
+ssize_t pwritevFull(platform::Handle fd, iovec* iov, int count, off_t offset);
 #endif
 
 /**

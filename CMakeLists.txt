@@ -113,6 +113,10 @@ source_group("Header Files\\Windows" FILES ${Folly_win32_HEADERS})
 source_group("Source Files\\Windows" FILES ${Folly_win32_SOURCES})
 
 # libfolly library
+if(MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4800")
+endif()
+
 add_library(libfolly STATIC ${Folly_SOURCES} ${Folly_HEADERS}
                             ${Folly_detail_SOURCES} ${Folly_detail_HEADERS}
 							${Folly_futures_SOURCES} ${Folly_futures_HEADERS}

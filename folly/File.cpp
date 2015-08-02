@@ -38,21 +38,21 @@
 namespace folly {
 
 File::File()
-  : fd_(-1)
+  : fd_(platform::kInvalidHandle)
   , ownsFd_(false)
 {}
 
-File::File(int fd, bool ownsFd)
+File::File(platform::Handle fd, bool ownsFd)
   : fd_(fd)
   , ownsFd_(ownsFd) {
-  CHECK_GE(fd, -1) << "fd must be -1 or non-negative";
-  CHECK(fd != -1 || !ownsFd) << "cannot own -1";
+  CHECK(fd != platform::kInvalidHandle || !ownsFd)
+    << "cannot own invalid handle";
 }
 
 File::File(const char* name, int flags, mode_t mode)
-  : fd_(folly::platform::platformOpen(name, flags, mode))
+  : fd_(platform::open(name, flags, mode))
   , ownsFd_(false) {
-  if (fd_ == -1) {
+  if (fd_ == platform::kInvalidHandle) {
     throwSystemError(folly::format("open(\"{}\", {:#o}, 0{:#o}) failed",
                                    name, flags, mode).fbstr());
   }
@@ -91,15 +91,18 @@ File::~File() {
   checkFopenError(tmpFile, "tmpfile() failed");
   SCOPE_EXIT { fclose(tmpFile); };
 
-  int fd = ::dup(fileno(tmpFile));
-  checkUnixError(fd, "dup() failed");
+  auto fd = platform::dup(platform::fileno(tmpFile));
+
+  if (fd == platform::kInvalidHandle) {
+    throwSystemError("dup() failed");
+  }
 
   return File(fd, true);
 }
 
-int File::release() noexcept {
-  int released = fd_;
-  fd_ = -1;
+platform::Handle File::release() noexcept {
+  auto released = fd_;
+  fd_ = platform::kInvalidHandle;
   ownsFd_ = false;
   return released;
 }
@@ -115,9 +118,12 @@ void swap(File& a, File& b) {
 }
 
 File File::dup() const {
-  if (fd_ != -1) {
-    int fd = ::dup(fd_);
-    checkUnixError(fd, "dup() failed");
+  if (fd_ != platform::kInvalidHandle) {
+    auto fd = platform::dup(fd_);
+
+    if (fd == platform::kInvalidHandle) {
+      throwSystemError("dup() failed");
+    }
 
     return File(fd, true);
   }
@@ -132,11 +138,12 @@ void File::close() {
 }
 
 bool File::closeNoThrow() {
-  int r = ownsFd_ ? ::close(fd_) : 0;
+  int r = ownsFd_ ? platform::close(fd_) : 0;
   release();
   return r == 0;
 }
 
+#if defined(HAVE_FLOCK)
 void File::lock() { doLock(LOCK_EX); }
 bool File::try_lock() { return doTryLock(LOCK_EX); }
 void File::lock_shared() { doLock(LOCK_SH); }
@@ -158,5 +165,6 @@ void File::unlock() {
   checkUnixError(flockNoInt(fd_, LOCK_UN), "flock() failed (unlock)");
 }
 void File::unlock_shared() { unlock(); }
+#endif
 
 }  // namespace folly

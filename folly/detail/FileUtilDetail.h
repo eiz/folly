@@ -18,9 +18,14 @@
 #define FOLLY_DETAIL_FILEUTILDETAIL_H_
 
 #include <cerrno>
-#include <unistd.h>
 
+#if defined(HAVE_UNISTD)
+#include <unistd.h>
+#endif
+
+#if defined(HAVE_SYS_UIO)
 #include <sys/uio.h>
+#endif
 
 /**
  * Helper functions and templates for FileUtil.cpp.  Declared here so
