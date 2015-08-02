@@ -32,15 +32,14 @@ extern "C" {
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <netdb.h>
 #else
 #include <winsock2.h>
 #include <ws2tcpip.h>
 // missing in socket headers
 #define sa_family_t ADDRESS_FAMILY
 #endif
-
-#include <sys/types.h>
-#include <netdb.h>
 }
 
 #include <folly/Conv.h>
@@ -283,7 +282,7 @@ inline std::string fastIpv4ToString(
 }
 
 inline std::string fastIpv6ToString(const in6_addr& in6Addr) {
-  const uint16_t* bytes = reinterpret_cast<const uint16_t*>(&in6Addr.s6_addr16);
+  const uint16_t* bytes = reinterpret_cast<const uint16_t*>(&in6Addr.s6_addr);
   char str[sizeof("2001:0db8:0000:0000:0000:ff00:0042:8329")];
   char* buf = str;
 

@@ -27,10 +27,8 @@
           that do not support clock_gettime(2).
 #endif
 
-/* For windows, we'll use pthread's time implementations */
 #ifdef _MSC_VER
-#include <pthread.h>
-#include <pthread_time.h>
+// TODO
 #else
 typedef uint8_t clockid_t;
 #define CLOCK_REALTIME 0

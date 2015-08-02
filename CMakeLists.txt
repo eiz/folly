@@ -12,10 +12,6 @@ include(folly/CMake/options.cmake)
 
 
 include_directories(${CMAKE_SOURCE_DIR})
-if(MSVC)
-include_directories(${CMAKE_SOURCE_DIR}/folly/win32)
-endif()
-
 
 # libfolly definition
 # we could do this with recursion but then we'd have to filter back out tests
@@ -26,37 +22,24 @@ file(GLOB Folly_HEADERS folly/*.h)
 file(GLOB Folly_SOURCES folly/*.cpp)
 
 list(REMOVE_ITEM Folly_SOURCES
+    ${CMAKE_SOURCE_DIR}/folly/LifoSem.cpp
     ${CMAKE_SOURCE_DIR}/folly/Benchmark.cpp
-    ${CMAKE_SOURCE_DIR}/folly/TimeoutQueue.cpp
-    )
+    ${CMAKE_SOURCE_DIR}/folly/TimeoutQueue.cpp)
 list(REMOVE_ITEM Folly_HEADERS
+    ${CMAKE_SOURCE_DIR}/folly/LifoSem.h
+    ${CMAKE_SOURCE_DIR}/folly/IndexedMemPool.h
     ${CMAKE_SOURCE_DIR}/folly/Benchmark.h
-    ${CMAKE_SOURCE_DIR}/folly/TimeoutQueue.h
-    )
+    ${CMAKE_SOURCE_DIR}/folly/TimeoutQueue.h)
 
 # /folly/detail (without malloc if weak symbols, without futex if not linux,
 # without clock if clock gettime, without functionalexcept if funcexcept)
 file(GLOB Folly_detail_HEADERS folly/detail/*.h)
 file(GLOB Folly_detail_SOURCES folly/detail/*.cpp)
 
-# the library items that use futex are linux only
 INCLUDE(CheckIncludeFileCXX)
-CHECK_INCLUDE_FILE_CXX("linux/futex.h" HAVE_FUTEX_H)
-
-# TODO: futex usage could possibly be replaced by windows/osx specific features
-if(NOT HAVE_FUTEX_H)
-    list(REMOVE_ITEM Folly_detail_SOURCES
-        ${CMAKE_SOURCE_DIR}/folly/detail/MemoryIdler.cpp
-        ${CMAKE_SOURCE_DIR}/folly/detail/Futex.cpp
-        )
-    list(REMOVE_ITEM Folly_detail_HEADERS
-        ${CMAKE_SOURCE_DIR}/folly/detail/MemoryIdler.h
-        ${CMAKE_SOURCE_DIR}/folly/detail/Futex.h
-        )
-endif()
 
 # if the library doesn't have weak symbols, add malloc.cpp
-INCLUDE(CheckCSourceCompiles) 
+INCLUDE(CheckCSourceCompiles)
 CHECK_C_SOURCE_COMPILES("
     extern \"C\" void configure_link_extern_weak_test() __attribute__((weak));
     int main(int argc, char** argv) {
@@ -79,11 +62,9 @@ endif()
 CHECK_INCLUDE_FILE_CXX(bits/funcexcept.h FOLLY_HAVE_BITS_FUNCTEXCEPT_H)
 if(FOLLY_HAVE_BITS_FUNCTEXCEPT_H)
     list(REMOVE_ITEM Folly_detail_SOURCES
-        ${CMAKE_SOURCE_DIR}/folly/detail/FunctionalExcept.cpp
-        )
+        ${CMAKE_SOURCE_DIR}/folly/detail/FunctionalExcept.cpp)
     list(REMOVE_ITEM Folly_detail_HEADERS
-        ${CMAKE_SOURCE_DIR}/folly/detail/FunctionalExcept.h
-        )
+        ${CMAKE_SOURCE_DIR}/folly/detail/FunctionalExcept.h)
 endif()
 
 CHECK_INCLUDE_FILE_CXX(sys/time.h HAVE_SYS_TIME)
@@ -91,12 +72,14 @@ INCLUDE(CheckFunctionExists)
 CHECK_FUNCTION_EXISTS(clock_gettime FOLLY_HAVE_CLOCK_GETTIME)
 if(FOLLY_HAVE_CLOCK_GETTIME)
     list(REMOVE_ITEM Folly_detail_SOURCES
-        ${CMAKE_SOURCE_DIR}/folly/detail/Clock.cpp
-        )
+        ${CMAKE_SOURCE_DIR}/folly/detail/Clock.cpp)
     list(REMOVE_ITEM Folly_detail_HEADERS
-        ${CMAKE_SOURCE_DIR}/folly/detail/Clock.h
-        )
+        ${CMAKE_SOURCE_DIR}/folly/detail/Clock.h)
 endif()
+
+# /folly/futures
+file(GLOB Folly_futures_SOURCES folly/futures/*.cpp folly/futures/detail/*.cpp)
+file(GLOB Folly_futures_HEADERS folly/futures/*.hpp folly/futures/detail/*.h)
 
 # /folly/gen
 file(GLOB Folly_gen_SOURCES folly/gen/*.cpp)
@@ -112,18 +95,34 @@ file(GLOB Folly_ioasync_SOURCES folly/io/async/*.cpp)
 # /folly/stats
 file(GLOB Folly_stats_HEADERS folly/stats/*.h)
 file(GLOB Folly_stats_SOURCES folly/stats/*.cpp)
+
+if (NOT WIN32)
+    # /folly/unix
+    file(GLOB Folly_unix_SOURCES folly/unix/*.cpp folly/unix/detail/*.cpp)
+    file(GLOB Folly_unix_HEADERS folly/unix/*.h folly/unix/detail/*.h)
+endif()
+
 # /folly/wangle
 file(GLOB Folly_wangle_HEADERS folly/wangle/*.h)
 file(GLOB Folly_wangle_SOURCES folly/wangle/*.cpp)
 
+# /folly/win32
+file(GLOB Folly_win32_SOURCES folly/win32/*.cpp folly/win32/detail/*.cpp)
+file(GLOB Folly_win32_HEADERS folly/win32/*.h folly/win32/detail/*.h)
+source_group("Header Files\\Windows" FILES ${Folly_win32_HEADERS})
+source_group("Source Files\\Windows" FILES ${Folly_win32_SOURCES})
+
 # libfolly library
-add_library(libfolly STATIC folly/Bits.cpp folly/detail/Clock.cpp #${Folly_SOURCES} ${Folly_HEADERS}
-#                            ${Folly_detail_SOURCES} ${Folly_detail_HEADERS}
-#                            ${Folly_gen_SOURCES} ${Folly_gen_HEADERS}
-#                            ${Folly_io_SOURCES} ${Folly_io_HEADERS}
+add_library(libfolly STATIC ${Folly_SOURCES} ${Folly_HEADERS}
+                            ${Folly_detail_SOURCES} ${Folly_detail_HEADERS}
+							${Folly_futures_SOURCES} ${Folly_futures_HEADERS}
+                            ${Folly_gen_SOURCES} ${Folly_gen_HEADERS}
+                            ${Folly_io_SOURCES} ${Folly_io_HEADERS}
 #                            ${Folly_ioasync_SOURCES} ${Folly_ioasync_HEADERS}
-#                            ${Folly_stats_SOURCES} ${Folly_stats_HEADERS}
-#                            ${Folly_wangle_SOURCES} ${Folly_wangle_HEADERS}
+                            ${Folly_stats_SOURCES} ${Folly_stats_HEADERS}
+                            ${Folly_unix_SOURCES} ${Folly_unix_HEADERS}
+                            ${Folly_wangle_SOURCES} ${Folly_wangle_HEADERS}
+			    ${Folly_win32_SOURCES} ${Folly_win32_HEADERS}
                             )
 
 if(enable_libfolly_benchmark OR enable_test)

@@ -22,7 +22,7 @@ namespace folly {
 
 namespace detail {
 
-constexpr std::chrono::seconds SingletonHolderBase::kDestroyWaitTime;
+const std::chrono::seconds SingletonHolderBase::kDestroyWaitTime { 5 };
 
 }
 

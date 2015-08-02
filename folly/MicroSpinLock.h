@@ -26,7 +26,9 @@
 #include <type_traits>
 #include <boost/noncopyable.hpp>
 #include <cstdlib>
+#if defined(HAVE_PTHREAD)
 #include <pthread.h>
+#endif
 #include <mutex>
 #include <atomic>
 

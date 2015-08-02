@@ -41,7 +41,6 @@
 #define FB_ONE_OR_NONE2(x, y) x
 #define FB_ONE_OR_NONE3(x, y, z) x
 #define FB_ONE_OR_NONE(...) VARARG(FB_ONE_OR_NONE, __VA_ARGS__)
-
 #else
 #define FB_ONE_OR_NONE(a, ...) FB_THIRD(a, ## __VA_ARGS__, a)
 #define FB_THIRD(a, b, ...) __VA_ARGS__

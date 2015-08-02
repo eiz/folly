@@ -143,7 +143,6 @@ pthread_rwlock_t Read        728698     24us       101ns     7.28ms     194us
 #include <algorithm>
 #include <boost/noncopyable.hpp>
 
-#include <sched.h>
 #include <glog/logging.h>
 
 #include <folly/Likely.h>

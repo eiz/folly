@@ -15,4 +15,8 @@
  */
 
 #pragma once
+#if defined(_MSC_VER)
+#define DEPRECATED __declspec(deprecated)
+#else
 #define DEPRECATED __attribute__((__deprecated__))
+#endif

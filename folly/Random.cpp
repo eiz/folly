@@ -17,8 +17,10 @@
 #include <folly/Random.h>
 
 #include <atomic>
+#if defined(__unix__)
 #include <unistd.h>
 #include <sys/time.h>
+#endif
 #include <random>
 #include <array>
 

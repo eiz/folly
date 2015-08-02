@@ -49,6 +49,9 @@ namespace detail {
         ++spinCount;
         asm_volatile_pause();
       } else {
+#if defined(_MSC_VER)
+        sched_yield();
+#else
         /*
          * Always sleep 0.5ms, assuming this will make the kernel put
          * us down for whatever its minimum timer resolution is (in
@@ -56,6 +59,7 @@ namespace detail {
          */
         struct timespec ts = { 0, 500000 };
         nanosleep(&ts, nullptr);
+#endif
       }
     }
   };

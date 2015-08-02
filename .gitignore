@@ -1,6 +1,8 @@
 *.o
 *.lo
 *.la
+*.swp
+*~
 .dirstamp
 Makefile
 Makefile.in
@@ -13,6 +15,7 @@ aclocal.m4
 autom4te.cache
 build-aux
 libtool
+/build
 folly/test/gtest-1.*
 folly/folly-config.h
 folly/test/*_benchmark

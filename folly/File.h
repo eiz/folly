@@ -20,7 +20,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#if defined(HAVE_UNISTD)
 #include <unistd.h>
+#endif
 
 #include <string>
 
@@ -34,6 +36,8 @@ namespace folly {
  */
 class File {
  public:
+  using HandleType = folly::platform::HandleType;
+
   /**
    * Creates an empty File object, for late initialization.
    */

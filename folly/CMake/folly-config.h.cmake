@@ -25,6 +25,7 @@
 #cmakedefine HAVE_CONSTEXPR_STRLEN 1
 #cmakedefine HAVE_EMMINTRIN 1
 #cmakedefine HAVE_UNISTD 1
+#cmakedefine HAVE_PTHREAD 1
 #cmakedefine HAVE_TIME 1
 #cmakedefine HAVE_SYS_TYPES_H 1
 #cmakedefine HAVE_SYS_TIME 1

@@ -94,7 +94,7 @@ class Try {
    *
    * @param ep The exception_pointer. Will be rethrown.
    */
-  DEPRECATED explicit Try(std::exception_ptr ep)
+  explicit Try(std::exception_ptr ep)
     : contains_(Contains::EXCEPTION) {
     try {
       std::rethrow_exception(ep);
@@ -254,7 +254,7 @@ class Try<void> {
    *
    * @param ep The exception_pointer. Will be rethrown.
    */
-  DEPRECATED explicit Try(std::exception_ptr ep) : hasValue_(false) {
+  explicit Try(std::exception_ptr ep) : hasValue_(false) {
     try {
       std::rethrow_exception(ep);
     } catch (const std::exception& e) {

@@ -25,7 +25,10 @@
 #include <folly/Likely.h>
 #include <folly/detail/CacheLocality.h>
 #include <folly/detail/Futex.h>
+
+#if defined(HAVE_SYS_RESOURCE)
 #include <sys/resource.h>
+#endif
 
 // SharedMutex is a reader-writer lock.  It is small, very fast, scalable
 // on multi-core, and suitable for use when readers or writers may block.
@@ -471,7 +474,12 @@ class SharedMutexImpl {
     }
   }
 
+// Mysteries of the universe: MSVC++ 2015 complains if the constants below are
+// private (the COMMON_CONCURRENCY_SHARED_MUTEX_DECLARE_STATIC_STORAGE decls do not
+// work). Just hack it for now.
+#if !defined(_MSC_VER)
  private:
+#endif
   typedef typename folly::detail::Futex<Atom> Futex;
 
   // Internally we use four kinds of wait contexts.  These are structs

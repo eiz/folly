@@ -16,6 +16,8 @@
 
 #include <folly/detail/CacheLocality.h>
 
+#ifndef _MSC_VER
+
 #define _GNU_SOURCE 1 // for RTLD_NOLOAD
 #include <dlfcn.h>
 #include <fstream>
@@ -276,3 +278,5 @@ Getcpu::Func AccessSpreader<std::atomic>::pickGetcpuFunc(size_t numStripes) {
 }
 
 } } // namespace folly::detail
+
+#endif // _MSC_VER

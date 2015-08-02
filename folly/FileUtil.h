@@ -25,9 +25,16 @@
 #include <limits>
 #include <sys/stat.h>
 #include <sys/types.h>
+
+#if defined(HAVE_SYS_UIO)
 #include <sys/uio.h>
+#endif
+
 #include <fcntl.h>
+
+#if defined(HAVE_UNISTD)
 #include <unistd.h>
+#endif
 
 namespace folly {
 

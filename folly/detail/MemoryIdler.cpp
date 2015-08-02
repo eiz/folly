@@ -20,13 +20,15 @@
 #include <folly/ScopeGuard.h>
 #include <folly/detail/CacheLocality.h>
 #include <limits.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/mman.h>
 #include <utility>
 
+#if defined(__unix__)
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#endif
 
 namespace folly { namespace detail {
 

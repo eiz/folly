@@ -40,6 +40,10 @@
  #ifndef FOLLY_HAVE_PTHREAD_YIELD
   #define pthread_yield sched_yield
  #endif
+#else
+  #if defined(_WIN32)
+    #include <folly/win32/sched.h>
+  #endif
 #endif
 
 // A change in folly/MemoryMapping.cpp uses MAP_ANONYMOUS, which is named
@@ -54,10 +58,11 @@
 #endif
 
 // MaxAlign: max_align_t isn't supported by gcc
-#ifdef __GNUC__
+#if defined(__GNUC__)
 struct MaxAlign { char c; } __attribute__((__aligned__));
 #else /* !__GNUC__ */
-# error Cannot define MaxAlign on this platform
+#include <cstddef>
+#define MaxAlign std::max_align_t
 #endif
 
 // compiler specific attribute translation
@@ -263,10 +268,6 @@ struct MaxAlign { char c; } __attribute__((__aligned__));
 #include <basetsd.h>
 typedef SSIZE_T ssize_t;
 
-// sprintf semantics are not exactly identical
-// but current usage is not a problem
-# define snprintf _snprintf
-
 // semantics here are identical
 # define strerror_r(errno,buf,len) strerror_s(buf,len,errno)
 
@@ -368,5 +369,9 @@ inline void asm_pause() {
 }
 
 }
+
+#ifdef _WIN32
+# include <folly/win32/Platform.h>
+#endif
 
 #endif // FOLLY_PORTABILITY_H_

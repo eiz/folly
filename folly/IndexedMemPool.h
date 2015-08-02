@@ -20,8 +20,10 @@
 #include <type_traits>
 #include <stdint.h>
 #include <assert.h>
+#if defined(__unix__)
 #include <unistd.h>
 #include <sys/mman.h>
+#endif
 #include <boost/noncopyable.hpp>
 #include <folly/AtomicStruct.h>
 #include <folly/detail/CacheLocality.h>

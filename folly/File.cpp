@@ -17,8 +17,14 @@
 #include <folly/File.h>
 
 #include <fcntl.h>
+
+#if defined(HAVE_UNISTD)
 #include <unistd.h>
+#endif
+
+#if defined(HAVE_SYS_FILE)
 #include <sys/file.h>
+#endif
 
 #include <folly/Exception.h>
 #include <folly/FileUtil.h>
@@ -44,7 +50,7 @@ File::File(int fd, bool ownsFd)
 }
 
 File::File(const char* name, int flags, mode_t mode)
-  : fd_(::open(name, flags, mode))
+  : fd_(folly::platform::platformOpen(name, flags, mode))
   , ownsFd_(false) {
   if (fd_ == -1) {
     throwSystemError(folly::format("open(\"{}\", {:#o}, 0{:#o}) failed",
