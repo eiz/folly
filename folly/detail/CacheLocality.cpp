@@ -16,11 +16,11 @@
 
 #include <folly/detail/CacheLocality.h>
 
-#ifndef _MSC_VER
-
+#if defined(__unix__)
 #define _GNU_SOURCE 1 // for RTLD_NOLOAD
 #include <dlfcn.h>
 #include <fstream>
+#endif
 
 #include <folly/Conv.h>
 #include <folly/Exception.h>
@@ -42,6 +42,7 @@ static CacheLocality getSystemLocalityInfo() {
   }
 #endif
 
+#if defined(__unix__)
   long numCpus = sysconf(_SC_NPROCESSORS_CONF);
   if (numCpus <= 0) {
     // This shouldn't happen, but if it does we should try to keep
@@ -55,6 +56,10 @@ static CacheLocality getSystemLocalityInfo() {
     numCpus = 32;
   }
   return CacheLocality::uniform(numCpus);
+#else
+  return CacheLocality::uniform(1); // TODO
+#endif
+
 }
 
 template <>
@@ -62,6 +67,8 @@ const CacheLocality& CacheLocality::system<std::atomic>() {
   static CacheLocality cache(getSystemLocalityInfo());
   return cache;
 }
+
+#if defined(__linux__)
 
 // Each level of cache has sharing sets, which are the set of cpus
 // that share a common cache at that level.  These are available in a
@@ -183,7 +190,7 @@ CacheLocality CacheLocality::readFromSysfs() {
     return rv;
   });
 }
-
+#endif
 
 CacheLocality CacheLocality::uniform(size_t numCpus) {
   CacheLocality rv;
@@ -201,6 +208,7 @@ CacheLocality CacheLocality::uniform(size_t numCpus) {
   return rv;
 }
 
+#if defined(__linux__)
 ////////////// Getcpu
 
 /// Resolves the dynamically loaded symbol __vdso_getcpu, returning null
@@ -227,6 +235,7 @@ Getcpu::Func Getcpu::vdsoFunc() {
   static Func func = loadVdsoGetcpu();
   return func;
 }
+#endif
 
 /////////////// SequentialThreadId
 
@@ -265,6 +274,7 @@ static int degenerateGetcpu(unsigned* cpu, unsigned* node, void* unused) {
 
 template<>
 Getcpu::Func AccessSpreader<std::atomic>::pickGetcpuFunc(size_t numStripes) {
+#if defined(__linux__)
   if (numStripes == 1) {
     // there's no need to call getcpu if there is only one stripe.
     // This should not be common, so we don't want to waste a test and
@@ -275,8 +285,9 @@ Getcpu::Func AccessSpreader<std::atomic>::pickGetcpuFunc(size_t numStripes) {
     auto best = Getcpu::vdsoFunc();
     return best ? best : &SequentialThreadId<std::atomic>::getcpu;
   }
+#else
+  return &degenerateGetcpu;
+#endif
 }
 
 } } // namespace folly::detail
-
-#endif // _MSC_VER

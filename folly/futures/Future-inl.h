@@ -21,7 +21,7 @@
 #include <random>
 #include <thread>
 
-#include <folly/experimental/fibers/Baton.h>
+#include <folly/Baton.h>
 #include <folly/Optional.h>
 #include <folly/Random.h>
 #include <folly/Traits.h>
@@ -917,7 +917,7 @@ void waitImpl(Future<T>& f) {
   // short-circuit if there's nothing to do
   if (f.isReady()) return;
 
-  folly::fibers::Baton baton;
+  folly::Baton<> baton;
   f = f.then([&](Try<T> t) {
     baton.post();
     return makeFuture(std::move(t));
@@ -937,7 +937,7 @@ void waitImpl(Future<T>& f, Duration dur) {
   // short-circuit if there's nothing to do
   if (f.isReady()) return;
 
-  auto baton = std::make_shared<folly::fibers::Baton>();
+  auto baton = std::make_shared<folly::Baton<>>();
   f = f.then([baton](Try<T> t) {
     baton->post();
     return makeFuture(std::move(t));
@@ -946,7 +946,7 @@ void waitImpl(Future<T>& f, Duration dur) {
   // Let's preserve the invariant that if we did not timeout (timed_wait returns
   // true), then the returned Future is complete when it is returned to the
   // caller. We need to wait out the race for that Future to complete.
-  if (baton->timed_wait(dur)) {
+  if (baton->timed_wait(std::chrono::steady_clock::now() + dur)) {
     while (!f.isReady()) {
       std::this_thread::yield();
     }
